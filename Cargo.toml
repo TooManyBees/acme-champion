@@ -1,0 +1,10 @@
+[package]
+name = "acme-champion"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+http-body-util = "0.1.3"
+hyper = { version = "1.8", features = ["http1", "server"] }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+tokio = { version = "1.50", features = ["macros", "net", "rt", "signal"] }
