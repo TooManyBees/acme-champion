@@ -121,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 handle_http(stream, service);
             }
             _ = shutdown_signal() => {
-                // TODO: unpack listen_http above so we can drop http_listener
+                drop(http_listener);
                 break;
             }
         }
