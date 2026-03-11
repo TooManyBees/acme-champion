@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::{
     Method, Request, Response, StatusCode,
-    body::{Bytes, Incoming},
+    body::{Body, Bytes, Incoming},
     server::conn::http1,
     service::Service,
 };
@@ -14,10 +14,15 @@ use hyper_util::rt::TokioIo;
 use tokio::{
     net::{TcpListener, TcpStream},
     signal::ctrl_c,
-    // sync::Mutex,
+    sync::Mutex,
 };
 
 type Challenges = Arc<Mutex<HashMap<String, String>>>;
+
+type HyperBodyResponse = Response<BoxBody<Bytes, hyper::Error>>;
+type HyperResponseResult = Result<HyperBodyResponse, hyper::Error>;
+
+const REGISTER_PATH: &'static str = "/register/";
 
 #[derive(Clone, Debug)]
 struct Champion {
@@ -30,32 +35,27 @@ impl Service<Request<Incoming>> for Champion {
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let fake_domain = String::from("hithere.com");
-        let fake_name = String::from("_acme_challenge.hithere.com");
-        let fake_challenge = String::from("super-secret-string");
-        let resp = match (req.method(), req.uri().path()) {
-            (&Method::GET, "/") => {
-                let result = self.get_challenges();
-                Ok(full_response(StatusCode::OK, result))
+        let challenges = self.challenges.clone();
+        Box::pin(async {
+            match (req.method(), req.uri().path()) {
+                (&Method::GET, "/") => {
+                    Self::handle_get_challenges(challenges).await
+                }
+                (&Method::POST, path) if path.starts_with(REGISTER_PATH) => {
+                    Self::handle_set_challenge(req, challenges).await
+                }
+                (&Method::DELETE, path) if path.starts_with(REGISTER_PATH) => {
+                    Self::handle_unset_challenge(req, challenges).await
+                }
+                _ => Ok(empty_response(StatusCode::NOT_FOUND)),
             }
-            (&Method::POST, "/register") => {
-                self.set_challenge(fake_domain, fake_name, fake_challenge);
-                Ok(empty_response(StatusCode::CREATED))
-            }
-            (&Method::DELETE, "/register") => {
-                self.unset_challenge(fake_domain, fake_name);
-                Ok(empty_response(StatusCode::NO_CONTENT))
-            }
-            _ => Ok(empty_response(StatusCode::NOT_FOUND)),
-        };
-
-        Box::pin(async { resp })
+        })
     }
 }
 
 impl Champion {
-    fn get_challenges(&self) -> String {
-        let challenges = self.challenges.lock().unwrap();
+    async fn handle_get_challenges(challenges: Challenges) -> HyperResponseResult {
+        let challenges = challenges.lock().await;
         let mut result = String::new();
         for (key, value) in challenges.iter() {
             result.push_str(key);
@@ -63,20 +63,43 @@ impl Champion {
             result.push_str(value);
             result.push('\n');
         }
-        result
+        Ok(full_response(StatusCode::OK, result))
     }
 
-    fn set_challenge(&self, _name: String, txt_name: String, txt_value: String) {
-        let mut challenges = self.challenges.lock().unwrap();
+    async fn handle_set_challenge(req: Request<Incoming>, challenges: Challenges) -> HyperResponseResult {
+        let body_size = req.body().size_hint().upper().unwrap_or(u64::MAX);
+        if body_size > 1024 {
+            return Ok(empty_response(StatusCode::PAYLOAD_TOO_LARGE));
+        }
+
+        let challenge_name = req.uri().path()[REGISTER_PATH.len()..].to_string();
+        let body = req.collect().await?.to_bytes();
+        let challenge_value = match String::from_utf8(body.to_vec()) {
+            Ok(v) => v,
+            Err(_) => return Ok(empty_response(StatusCode::BAD_REQUEST)),
+        };
+
+        Self::set_challenge(challenges, String::from(""), challenge_name, challenge_value).await;
+        Ok(empty_response(StatusCode::CREATED))
+    }
+
+    async fn set_challenge(challenges: Challenges, _name: String, txt_name: String, txt_value: String) {
+        let mut challenges = challenges.lock().await;
         if challenges.contains_key(&txt_name) {
             eprintln!("Overwriting existing challenge for {txt_name}");
         }
         challenges.insert(txt_name, txt_value);
     }
 
-    fn unset_challenge(&self, _name: String, txt_name: String) {
-        let mut challenges = self.challenges.lock().unwrap();
-        challenges.remove(&txt_name);
+    async fn handle_unset_challenge(req: Request<Incoming>, challenges: Challenges) -> HyperResponseResult {
+        let challenge_name = &req.uri().path()[REGISTER_PATH.len()..];
+        Self::unset_challenge(challenges, String::from(""), challenge_name).await;
+        Ok(empty_response(StatusCode::NO_CONTENT))
+    }
+
+    async fn unset_challenge(challenges: Challenges, _name: String, txt_name: &str) {
+        let mut challenges = challenges.lock().await;
+        challenges.remove(txt_name);
     }
 }
 
