@@ -24,12 +24,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let challenges: Challenges = Arc::new(Mutex::new(HashMap::new()));
 
-    let challenge_register = ChallengeRegister::new(challenges.clone());
-
     loop {
         tokio::select! {
             Ok((stream, _)) = http_listener.accept() => {
-                let service = challenge_register.clone();
+                let service = ChallengeRegister::new(challenges.clone());
                 handle_http(stream, service);
             }
             _ = shutdown_signal() => {
