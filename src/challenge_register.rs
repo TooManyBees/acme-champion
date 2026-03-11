@@ -1,0 +1,134 @@
+use super::Challenges;
+
+use std::pin::Pin;
+
+use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
+use hyper::{
+    Method, Request, Response, StatusCode,
+    body::{Body, Bytes, Incoming},
+    service::Service,
+};
+
+type HyperBodyResponse = Response<BoxBody<Bytes, hyper::Error>>;
+type HyperResponseResult = Result<HyperBodyResponse, hyper::Error>;
+
+#[derive(Clone, Debug)]
+pub struct ChallengeRegister {
+    challenges: Challenges,
+}
+
+impl ChallengeRegister {
+    pub fn new(challenges: Challenges) -> Self {
+        ChallengeRegister { challenges }
+    }
+}
+
+const REGISTER_PATH: &'static str = "/register/";
+
+impl Service<Request<Incoming>> for ChallengeRegister {
+    type Response = Response<BoxBody<Bytes, hyper::Error>>;
+    type Error = hyper::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn call(&self, req: Request<Incoming>) -> Self::Future {
+        let challenges = self.challenges.clone();
+        Box::pin(async {
+            match (req.method(), req.uri().path()) {
+                (&Method::GET, "/") => handle_get_challenges(challenges).await,
+                (&Method::POST, path) if path.starts_with(REGISTER_PATH) => {
+                    handle_set_challenge(req, challenges).await
+                }
+                (&Method::DELETE, path) if path.starts_with(REGISTER_PATH) => {
+                    handle_unset_challenge(req, challenges).await
+                }
+                _ => Ok(empty_response(StatusCode::NOT_FOUND)),
+            }
+        })
+    }
+}
+
+async fn handle_get_challenges(challenges: Challenges) -> HyperResponseResult {
+    let challenges = challenges.lock().await;
+    let mut result = String::new();
+    for (key, value) in challenges.iter() {
+        result.push_str(key);
+        result.push(' ');
+        result.push_str(value);
+        result.push('\n');
+    }
+    Ok(full_response(StatusCode::OK, result))
+}
+
+async fn handle_set_challenge(
+    req: Request<Incoming>,
+    challenges: Challenges,
+) -> HyperResponseResult {
+    let body_size = req.body().size_hint().upper().unwrap_or(u64::MAX);
+    if body_size > 1024 {
+        return Ok(empty_response(StatusCode::PAYLOAD_TOO_LARGE));
+    }
+
+    let challenge_name = req.uri().path()[REGISTER_PATH.len()..].to_string();
+    let body = req.collect().await?.to_bytes();
+    let challenge_value = match String::from_utf8(body.to_vec()) {
+        Ok(v) => v,
+        Err(_) => return Ok(empty_response(StatusCode::BAD_REQUEST)),
+    };
+
+    set_challenge(
+        challenges,
+        challenge_name,
+        challenge_value,
+    )
+    .await;
+    Ok(empty_response(StatusCode::CREATED))
+}
+
+async fn set_challenge(challenges: Challenges, txt_name: String, txt_value: String) {
+    let mut challenges = challenges.lock().await;
+    if challenges.contains_key(&txt_name) {
+        eprintln!("Overwriting existing challenge for {txt_name}");
+    }
+    challenges.insert(txt_name, txt_value);
+}
+
+async fn handle_unset_challenge(
+    req: Request<Incoming>,
+    challenges: Challenges,
+) -> HyperResponseResult {
+    let challenge_name = &req.uri().path()[REGISTER_PATH.len()..];
+    unset_challenge(challenges, challenge_name).await;
+    Ok(empty_response(StatusCode::NO_CONTENT))
+}
+
+async fn unset_challenge(challenges: Challenges, txt_name: &str) {
+    let mut challenges = challenges.lock().await;
+    challenges.remove(txt_name);
+}
+
+fn empty_response(status_code: StatusCode) -> Response<BoxBody<Bytes, hyper::Error>> {
+    let mut resp = Response::new(empty_body());
+    *resp.status_mut() = status_code;
+    resp
+}
+
+fn empty_body() -> BoxBody<Bytes, hyper::Error> {
+    Empty::<Bytes>::new()
+        .map_err(|never| match never {})
+        .boxed()
+}
+
+fn full_response<T: Into<Bytes>>(
+    status_code: StatusCode,
+    chunk: T,
+) -> Response<BoxBody<Bytes, hyper::Error>> {
+    let mut resp = Response::new(full_body(chunk));
+    *resp.status_mut() = status_code;
+    resp
+}
+
+fn full_body<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
+    Full::new(chunk.into())
+        .map_err(|never| match never {})
+        .boxed()
+}
