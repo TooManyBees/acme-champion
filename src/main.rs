@@ -1,5 +1,4 @@
-mod challenge_register;
-mod dns_handler;
+mod http_handler;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -10,7 +9,7 @@ use tokio::{
     sync::Mutex,
 };
 
-use challenge_register::handle_http;
+use http_handler::handle_http;
 
 #[derive(Debug)]
 struct Challenges(Mutex<HashMap<String, String>>);
