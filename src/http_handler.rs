@@ -4,13 +4,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
-use hyper_util::rt::TokioIo;
 use hyper::{
     Method, Request, Response, StatusCode,
     body::{Body, Bytes, Incoming},
     server::conn::http1,
     service::Service,
 };
+use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 
 type HyperBodyResponse = Response<BoxBody<Bytes, hyper::Error>>;
