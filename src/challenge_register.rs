@@ -1,24 +1,38 @@
 use super::Challenges;
 
 use std::pin::Pin;
+use std::sync::Arc;
 
 use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
+use hyper_util::rt::TokioIo;
 use hyper::{
     Method, Request, Response, StatusCode,
     body::{Body, Bytes, Incoming},
+    server::conn::http1,
     service::Service,
 };
+use tokio::net::TcpStream;
 
 type HyperBodyResponse = Response<BoxBody<Bytes, hyper::Error>>;
 type HyperResponseResult = Result<HyperBodyResponse, hyper::Error>;
 
+pub fn handle_http(stream: TcpStream, challenges: &Arc<Challenges>) {
+    let service = ChallengeRegister::new(challenges.clone());
+    let io = TokioIo::new(stream);
+    tokio::task::spawn(async move {
+        if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+            eprintln!("Error serving connection: {:?}", err);
+        }
+    });
+}
+
 #[derive(Clone, Debug)]
-pub struct ChallengeRegister {
-    challenges: Challenges,
+struct ChallengeRegister {
+    challenges: Arc<Challenges>,
 }
 
 impl ChallengeRegister {
-    pub fn new(challenges: Challenges) -> Self {
+    fn new(challenges: Arc<Challenges>) -> Self {
         ChallengeRegister { challenges }
     }
 }
@@ -47,8 +61,8 @@ impl Service<Request<Incoming>> for ChallengeRegister {
     }
 }
 
-async fn handle_get_challenges(challenges: Challenges) -> HyperResponseResult {
-    let challenges = challenges.lock().await;
+async fn handle_get_challenges(challenges: Arc<Challenges>) -> HyperResponseResult {
+    let challenges = challenges.0.lock().await;
     let mut result = String::new();
     for (key, value) in challenges.iter() {
         result.push_str(key);
@@ -61,7 +75,7 @@ async fn handle_get_challenges(challenges: Challenges) -> HyperResponseResult {
 
 async fn handle_set_challenge(
     req: Request<Incoming>,
-    challenges: Challenges,
+    challenges: Arc<Challenges>,
 ) -> HyperResponseResult {
     let body_size = req.body().size_hint().upper().unwrap_or(u64::MAX);
     if body_size > 1024 {
@@ -75,17 +89,12 @@ async fn handle_set_challenge(
         Err(_) => return Ok(empty_response(StatusCode::BAD_REQUEST)),
     };
 
-    set_challenge(
-        challenges,
-        challenge_name,
-        challenge_value,
-    )
-    .await;
+    set_challenge(challenges, challenge_name, challenge_value).await;
     Ok(empty_response(StatusCode::CREATED))
 }
 
-async fn set_challenge(challenges: Challenges, txt_name: String, txt_value: String) {
-    let mut challenges = challenges.lock().await;
+async fn set_challenge(challenges: Arc<Challenges>, txt_name: String, txt_value: String) {
+    let mut challenges = challenges.0.lock().await;
     if challenges.contains_key(&txt_name) {
         eprintln!("Overwriting existing challenge for {txt_name}");
     }
@@ -94,15 +103,15 @@ async fn set_challenge(challenges: Challenges, txt_name: String, txt_value: Stri
 
 async fn handle_unset_challenge(
     req: Request<Incoming>,
-    challenges: Challenges,
+    challenges: Arc<Challenges>,
 ) -> HyperResponseResult {
     let challenge_name = &req.uri().path()[REGISTER_PATH.len()..];
     unset_challenge(challenges, challenge_name).await;
     Ok(empty_response(StatusCode::NO_CONTENT))
 }
 
-async fn unset_challenge(challenges: Challenges, txt_name: &str) {
-    let mut challenges = challenges.lock().await;
+async fn unset_challenge(challenges: Arc<Challenges>, txt_name: &str) {
+    let mut challenges = challenges.0.lock().await;
     challenges.remove(txt_name);
 }
 
