@@ -55,7 +55,9 @@ pub fn handle_dns(
     let dns_handle = dns_handle.with_remote_addr(src_addr);
     let challenges = challenges.clone();
     tokio::task::spawn(async move {
-        handle_request(message, challenges, dns_handle).await;
+        if let Err(e) = handle_request(message, challenges, dns_handle).await {
+            tracing::error!(error = %e, "error handling DNS request");
+        }
     });
 }
 
