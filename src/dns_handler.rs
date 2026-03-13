@@ -2,12 +2,12 @@ use super::Challenges;
 
 use hickory_proto::{
     ProtoError,
-    op::{Header, LowerQuery, header::MessageType},
-    rr::record_type::RecordType,
+    op::{Header, LowerQuery, Message, ResponseCode, header::MessageType},
+    rr::{rdata::txt::TXT, record_data::RData, record_type::RecordType, resource::Record},
     runtime::TokioRuntimeProvider,
-    serialize::binary::{BinDecodable, BinDecoder},
+    serialize::binary::{BinDecodable, BinDecoder, BinEncodable, BinEncoder},
     udp::UdpStream,
-    xfer::{BufDnsStreamHandle, SerialMessage},
+    xfer::{BufDnsStreamHandle, DnsStreamHandle, SerialMessage},
 };
 use std::{
     io::{Error as IoError, ErrorKind},
@@ -41,10 +41,10 @@ pub fn handle_dns(
                 tracing::error!(error = %e, "UDP connection error");
                 return;
             }
-        }
+        },
         None => {
             tracing::error!("UDP connection closed");
-            return // TODO: return an error which breaks out of select loop
+            return; // TODO: return an error which breaks out of select loop
         }
     };
 
@@ -64,31 +64,36 @@ const ACME_CHALLENGE_LABEL: &'static str = "_acme-challenge.";
 async fn handle_request(
     message: SerialMessage,
     challenges: Arc<Challenges>,
-    response_handler: BufDnsStreamHandle,
+    mut response_handler: BufDnsStreamHandle,
 ) -> Result<(), ProtoError> {
-    // let src_addr = message.addr();
-
-    let queries = read_queries_from_message(&message)?;
+    let (header, queries) = read_message(&message)?;
 
     let challenges = challenges.0.lock().await;
-    for q in queries {
-        match challenges.get(&q) {
+    for (query, name) in queries.into_iter().take(1) {
+        tracing::debug!(?challenges, ?name);
+        let response = match challenges.get(&name) {
             Some(answer) => {
-                tracing::debug!(challenge_name = %q, "found registered DNS challenge");
-
+                tracing::debug!(challenge_name = %name, "found registered DNS challenge");
+                challenge_response(&header, &query, Some(answer))
             }
             None => {
-                tracing::debug!(challenge_name = %q, "DNS challenge not found");
-
+                tracing::debug!(challenge_name = %name, "DNS challenge not found");
+                challenge_response(&header, &query, None)
             }
-        }
-
+        };
+        let mut buffer = Vec::with_capacity(4096);
+        let mut encoder = BinEncoder::new(&mut buffer);
+        encoder.set_max_size(4096);
+        response.emit(&mut encoder)?;
+        response_handler.send(SerialMessage::new(buffer, message.addr()))?;
     }
 
     Ok(())
 }
 
-fn read_queries_from_message(message: &SerialMessage) -> Result<Vec<String>, ProtoError> {
+fn read_message(
+    message: &SerialMessage,
+) -> Result<(Header, Vec<(LowerQuery, String)>), ProtoError> {
     let mut decoder = BinDecoder::new(message.bytes());
 
     let header = Header::read(&mut decoder).map_err(|e| {
@@ -99,9 +104,9 @@ fn read_queries_from_message(message: &SerialMessage) -> Result<Vec<String>, Pro
     tracing::debug!(header = ?header, "parsed DNS header");
 
     if header.message_type() == MessageType::Response {
-        // TODO: create an error enum to represent skipping responses
+        // FIXME: create an error enum to represent skipping responses
         tracing::debug!("ignoring DNS response");
-        return Ok(vec![]);
+        return Ok((header, vec![]));
     }
 
     let query_count = header.query_count() as usize;
@@ -121,10 +126,45 @@ fn read_queries_from_message(message: &SerialMessage) -> Result<Vec<String>, Pro
             tracing::debug!(query_name = %name, "ignoring non-acme DNS query");
             continue;
         }
-        queries.push(name);
+        let domain_name = query.name().base_name().to_utf8();
+        let domain_name = match domain_name.strip_suffix('.') {
+            Some(name) => name.to_string(),
+            None => domain_name,
+        };
+        queries.push((query, domain_name));
     }
 
     tracing::debug!(queries = ?queries, "parsed DNS queries");
 
-    Ok(queries)
+    Ok((header, queries))
+}
+
+fn challenge_response(
+    request_header: &Header,
+    query: &LowerQuery,
+    answer: Option<&String>,
+) -> Message {
+    let mut response_header = Header::response_from_request(request_header);
+    response_header.set_authoritative(true);
+
+    let mut message = Message::new();
+
+    message.add_query(query.original().clone());
+
+    match answer {
+        Some(answer_value) => {
+            response_header.set_response_code(ResponseCode::NoError);
+            let name = query.original().name().clone();
+            let rdata = RData::TXT(TXT::new(vec![answer_value.clone()]));
+            let record = Record::from_rdata(name, 30, rdata);
+            message.add_answer(record);
+        }
+        None => {
+            response_header.set_response_code(ResponseCode::NXDomain);
+        }
+    }
+
+    message.set_header(response_header);
+
+    message
 }
