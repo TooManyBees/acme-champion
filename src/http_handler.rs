@@ -21,7 +21,7 @@ pub fn handle_http(stream: TcpStream, challenges: &Arc<Challenges>) {
     let io = TokioIo::new(stream);
     tokio::task::spawn(async move {
         if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-            eprintln!("Error serving connection: {:?}", err);
+            tracing::error!(error = %err, "error serving TCP connection");
         }
     });
 }
@@ -96,8 +96,9 @@ async fn handle_set_challenge(
 async fn set_challenge(challenges: Arc<Challenges>, txt_name: String, txt_value: String) {
     let mut challenges = challenges.0.lock().await;
     if challenges.contains_key(&txt_name) {
-        eprintln!("Overwriting existing challenge for {txt_name}");
+        tracing::warn!(challenge_name = %txt_name, "overwriting existing challenge");
     }
+    tracing::info!(challenge_name = %txt_name, challenge_value = %txt_value, "set challenge");
     challenges.insert(txt_name, txt_value);
 }
 
@@ -112,6 +113,7 @@ async fn handle_unset_challenge(
 
 async fn unset_challenge(challenges: Arc<Challenges>, txt_name: &str) {
     let mut challenges = challenges.0.lock().await;
+    tracing::info!(challenge_name = %txt_name, "cleaned up challenge");
     challenges.remove(txt_name);
 }
 

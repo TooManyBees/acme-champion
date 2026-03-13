@@ -34,15 +34,18 @@ pub fn handle_dns(
         Some(Ok(message)) => message,
         Some(Err(e)) => match e.kind() {
             ErrorKind::NotConnected | ErrorKind::ConnectionAborted => {
-                eprintln!("UDP connection broken {}", e);
+                tracing::error!(error = %e, "UDP connection broken");
                 return; // TODO: return an error which breaks out of select loop
             }
             _ => {
-                eprintln!("UDP connection error {}", e);
+                tracing::error!(error = %e, "UDP connection error");
                 return;
             }
-        },
-        None => return, // TODO: return an error which breaks out of select loop
+        }
+        None => {
+            tracing::error!("UDP connection closed");
+            return // TODO: return an error which breaks out of select loop
+        }
     };
 
     let src_addr = message.addr();
