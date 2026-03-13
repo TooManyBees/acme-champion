@@ -49,6 +49,7 @@ pub fn handle_dns(
     };
 
     let src_addr = message.addr();
+    tracing::debug!(remote_addr = %src_addr, "new UDP message");
     // TODO validate src_addr
 
     let dns_handle = dns_handle.with_remote_addr(src_addr);
@@ -73,9 +74,11 @@ async fn handle_request(
     for q in queries {
         match challenges.get(&q) {
             Some(answer) => {
+                tracing::debug!(challenge_name = %q, "found registered DNS challenge");
 
             }
             None => {
+                tracing::debug!(challenge_name = %q, "DNS challenge not found");
 
             }
         }
@@ -88,28 +91,40 @@ async fn handle_request(
 fn read_queries_from_message(message: &SerialMessage) -> Result<Vec<String>, ProtoError> {
     let mut decoder = BinDecoder::new(message.bytes());
 
-    let header = Header::read(&mut decoder)?;
+    let header = Header::read(&mut decoder).map_err(|e| {
+        tracing::warn!(error = %e, "malformed DNS header");
+        e
+    })?;
+
+    tracing::debug!(header = ?header, "parsed DNS header");
 
     if header.message_type() == MessageType::Response {
         // TODO: create an error enum to represent skipping responses
+        tracing::debug!("ignoring DNS response");
         return Ok(vec![]);
     }
 
     let query_count = header.query_count() as usize;
     let mut queries = Vec::with_capacity(query_count);
     for _ in 0..query_count {
-        let query = LowerQuery::read(&mut decoder)?;
+        let query = LowerQuery::read(&mut decoder).map_err(|e| {
+            // TODO: consider continuing on error, rather than early exiting
+            tracing::warn!(error = %e, "malformed DNS query");
+            e
+        })?;
         if !matches!(query.query_type(), RecordType::TXT) {
-            // TODO: log skipping record
+            tracing::debug!(query_type = %query.query_type(), "ignoring non-TXT DNS query");
             continue;
         }
         let name = query.name().to_utf8();
         if !name.starts_with(ACME_CHALLENGE_LABEL) || name == ACME_CHALLENGE_LABEL {
-            // TODO: log skipping record
+            tracing::debug!(query_name = %name, "ignoring non-acme DNS query");
             continue;
         }
         queries.push(name);
     }
+
+    tracing::debug!(queries = ?queries, "parsed DNS queries");
 
     Ok(queries)
 }
