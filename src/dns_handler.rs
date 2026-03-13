@@ -25,45 +25,42 @@ pub fn make_dns_stream(
     )
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum DnsStreamResult {
+    Processing,
+    InvalidReturnAddress,
+    ConnectionBroken,
+    ConnectionError,
+}
+
 pub fn handle_dns(
     next_message: Option<Result<SerialMessage, IoError>>,
     dns_handle: BufDnsStreamHandle,
     challenges: &Arc<Challenges>,
-) {
+) -> DnsStreamResult {
     let message = match next_message {
         Some(Ok(message)) => message,
         Some(Err(e)) => match e.kind() {
             ErrorKind::NotConnected | ErrorKind::ConnectionAborted => {
                 tracing::error!(error = %e, "UDP connection broken");
-                return; // TODO: return an error which breaks out of select loop
+                return DnsStreamResult::ConnectionBroken;
             }
             _ => {
                 tracing::error!(error = %e, "UDP connection error");
-                return;
+                return DnsStreamResult::ConnectionError;
             }
         },
         None => {
             tracing::error!("UDP connection closed");
-            return; // TODO: return an error which breaks out of select loop
+            return DnsStreamResult::ConnectionBroken;
         }
     };
 
     let src_addr = message.addr();
     tracing::debug!(remote_addr = %src_addr, "new UDP message");
-    if src_addr.port() == 0 {
-        return;
-    }
-    match src_addr.ip() {
-        IpAddr::V4(addr) => {
-            if addr.is_unspecified() || addr.is_broadcast() {
-                return;
-            }
-        }
-        IpAddr::V6(addr) => {
-            if addr.is_unspecified() {
-                return;
-            }
-        }
+    if !valid_return_address(&src_addr) {
+        tracing::warn!(addr = %src_addr, "ignoring DNS request with invalid return address");
+        return DnsStreamResult::InvalidReturnAddress;
     }
 
     let dns_handle = dns_handle.with_remote_addr(src_addr);
@@ -76,6 +73,8 @@ pub fn handle_dns(
             _ => {}
         }
     });
+
+    return DnsStreamResult::Processing;
 }
 
 const ACME_CHALLENGE_LABEL: &'static str = "_acme-challenge.";
@@ -211,4 +210,23 @@ fn challenge_response(
     message.set_header(response_header);
 
     message
+}
+
+fn valid_return_address(src_addr: &SocketAddr) -> bool {
+    if src_addr.port() == 0 {
+        return false;
+    }
+    match src_addr.ip() {
+        IpAddr::V4(addr) => {
+            if addr.is_unspecified() || addr.is_broadcast() {
+                return false;
+            }
+        }
+        IpAddr::V6(addr) => {
+            if addr.is_unspecified() {
+                return false;
+            }
+        }
+    }
+    return true
 }

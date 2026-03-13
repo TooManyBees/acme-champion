@@ -11,7 +11,7 @@ use tokio::{
     sync::Mutex,
 };
 
-use dns_handler::{handle_dns, make_dns_stream};
+use dns_handler::{handle_dns, make_dns_stream, DnsStreamResult};
 use http_handler::handle_http;
 
 #[derive(Debug)]
@@ -41,7 +41,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     loop {
         tokio::select! {
             Ok((stream, _)) = http_listener.accept() => handle_http(stream, &challenges),
-            next = dns_stream.next() => handle_dns(next, dns_handler.clone(), &challenges),
+            next = dns_stream.next() => {
+                match handle_dns(next, dns_handler.clone(), &challenges) {
+                    DnsStreamResult::ConnectionBroken => break,
+                    _ => {}
+                }
+            },
             _ = shutdown_signal() => {
                 tracing::info!("Received shutdown signal");
                 drop(http_listener);
