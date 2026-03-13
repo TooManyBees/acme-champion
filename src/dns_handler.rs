@@ -11,7 +11,7 @@ use hickory_proto::{
 };
 use std::{
     io::{Error as IoError, ErrorKind},
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::Arc,
 };
 use tokio::net::UdpSocket;
@@ -21,7 +21,7 @@ pub fn make_dns_stream(
 ) -> (UdpStream<TokioRuntimeProvider>, BufDnsStreamHandle) {
     UdpStream::<TokioRuntimeProvider>::with_bound(
         udp_socket,
-        SocketAddr::from(([255, 255, 255, 255], 0)),
+        SocketAddr::from(([255, 255, 255, 254], 0)),
     )
 }
 
@@ -50,52 +50,81 @@ pub fn handle_dns(
 
     let src_addr = message.addr();
     tracing::debug!(remote_addr = %src_addr, "new UDP message");
-    // TODO validate src_addr
+    if src_addr.port() == 0 {
+        return;
+    }
+    match src_addr.ip() {
+        IpAddr::V4(addr) => {
+            if addr.is_unspecified() || addr.is_broadcast() {
+                return;
+            }
+        }
+        IpAddr::V6(addr) => {
+            if addr.is_unspecified() {
+                return;
+            }
+        }
+    }
 
     let dns_handle = dns_handle.with_remote_addr(src_addr);
     let challenges = challenges.clone();
     tokio::task::spawn(async move {
-        if let Err(e) = handle_request(message, challenges, dns_handle).await {
-            tracing::error!(error = %e, "error handling DNS request");
+        match handle_request(message, challenges, dns_handle).await {
+            Err(HandleMessageError::ProtoError(e)) => {
+                tracing::error!(error = %e, "error handling DNS request")
+            }
+            _ => {}
         }
     });
 }
 
 const ACME_CHALLENGE_LABEL: &'static str = "_acme-challenge.";
 
+#[derive(Clone, Debug)]
+enum HandleMessageError {
+    SkippingResponse,
+    NoTxtQueries,
+    ProtoError(ProtoError),
+}
+
+impl From<ProtoError> for HandleMessageError {
+    fn from(e: ProtoError) -> Self {
+        HandleMessageError::ProtoError(e)
+    }
+}
+
 async fn handle_request(
     message: SerialMessage,
     challenges: Arc<Challenges>,
     mut response_handler: BufDnsStreamHandle,
-) -> Result<(), ProtoError> {
-    let (header, queries) = read_message(&message)?;
+) -> Result<(), HandleMessageError> {
+    let (header, query, name) = read_message(&message)?;
 
     let challenges = challenges.0.lock().await;
-    for (query, name) in queries.into_iter().take(1) {
-        tracing::debug!(?challenges, ?name);
-        let response = match challenges.get(&name) {
-            Some(answer) => {
-                tracing::debug!(challenge_name = %name, "found registered DNS challenge");
-                challenge_response(&header, &query, Some(answer))
-            }
-            None => {
-                tracing::debug!(challenge_name = %name, "DNS challenge not found");
-                challenge_response(&header, &query, None)
-            }
-        };
-        let mut buffer = Vec::with_capacity(4096);
-        let mut encoder = BinEncoder::new(&mut buffer);
-        encoder.set_max_size(4096);
-        response.emit(&mut encoder)?;
-        response_handler.send(SerialMessage::new(buffer, message.addr()))?;
-    }
+
+    tracing::debug!(?challenges, ?name);
+    let response = match challenges.get(&name) {
+        Some(answer) => {
+            tracing::debug!(challenge_name = %name, "found registered DNS challenge");
+            challenge_response(&header, &query, Some(answer))
+        }
+        None => {
+            tracing::debug!(challenge_name = %name, "DNS challenge not found");
+            challenge_response(&header, &query, None)
+        }
+    };
+    let mut buffer = Vec::with_capacity(4096);
+    let mut encoder = BinEncoder::new(&mut buffer);
+    encoder.set_max_size(4096);
+    response.emit(&mut encoder)?;
+    response_handler.send(SerialMessage::new(buffer, message.addr()))?;
 
     Ok(())
 }
 
 fn read_message(
     message: &SerialMessage,
-) -> Result<(Header, Vec<(LowerQuery, String)>), ProtoError> {
+) -> Result<(Header, LowerQuery, String), HandleMessageError> {
     let mut decoder = BinDecoder::new(message.bytes());
 
     let header = Header::read(&mut decoder).map_err(|e| {
@@ -106,39 +135,52 @@ fn read_message(
     tracing::debug!(header = ?header, "parsed DNS header");
 
     if header.message_type() == MessageType::Response {
-        // FIXME: create an error enum to represent skipping responses
         tracing::debug!("ignoring DNS response");
-        return Ok((header, vec![]));
+        return Err(HandleMessageError::SkippingResponse);
     }
 
     let query_count = header.query_count() as usize;
-    let mut queries = Vec::with_capacity(query_count);
+    let mut found = None;
     for _ in 0..query_count {
-        let query = LowerQuery::read(&mut decoder).map_err(|e| {
-            // TODO: consider continuing on error, rather than early exiting
-            tracing::warn!(error = %e, "malformed DNS query");
-            e
-        })?;
+        let query = match LowerQuery::read(&mut decoder) {
+            Ok(q) => q,
+            Err(e) => {
+                tracing::warn!(error = %e, "malformed DNS query");
+                continue;
+            }
+        };
+
         if !matches!(query.query_type(), RecordType::TXT) {
             tracing::debug!(query_type = %query.query_type(), "ignoring non-TXT DNS query");
             continue;
         }
+
         let name = query.name().to_utf8();
         if !name.starts_with(ACME_CHALLENGE_LABEL) || name == ACME_CHALLENGE_LABEL {
             tracing::debug!(query_name = %name, "ignoring non-acme DNS query");
             continue;
         }
+
         let domain_name = query.name().base_name().to_utf8();
         let domain_name = match domain_name.strip_suffix('.') {
             Some(name) => name.to_string(),
             None => domain_name,
         };
-        queries.push((query, domain_name));
+
+        found = Some((query, domain_name));
+        break;
     }
 
-    tracing::debug!(queries = ?queries, "parsed DNS queries");
-
-    Ok((header, queries))
+    match found {
+        Some((query, name)) => {
+            tracing::debug!(query = ?query, "parsed DNS query");
+            Ok((header, query, name))
+        }
+        None => {
+            tracing::debug!("no queries found for TXT records");
+            Err(HandleMessageError::NoTxtQueries)
+        }
+    }
 }
 
 fn challenge_response(
