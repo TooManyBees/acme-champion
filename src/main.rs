@@ -11,7 +11,7 @@ use tokio::{
     sync::Mutex,
 };
 
-use dns_handler::{handle_dns, make_dns_stream, DnsStreamResult};
+use dns_handler::{DnsStreamResult, handle_dns, make_dns_stream};
 use http_handler::handle_http;
 
 #[derive(Debug)]
@@ -64,7 +64,7 @@ fn init_tracing() {
     use tracing_subscriber::{filter::Targets, prelude::*};
     let targets = Targets::new()
         .with_target("hyper", Level::INFO)
-        .with_default(Level::DEBUG);
+        .with_default(Level::TRACE);
     let reg = tracing_subscriber::registry();
     let layer = tracing_subscriber::fmt::layer().pretty();
     reg.with(layer.with_filter(targets)).init();

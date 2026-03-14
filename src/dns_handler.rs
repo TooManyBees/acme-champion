@@ -77,7 +77,7 @@ pub fn handle_dns(
     return DnsStreamResult::Processing;
 }
 
-const ACME_CHALLENGE_LABEL: &'static str = "_acme-challenge.";
+const ACME_CHALLENGE_PREFIX: &'static str = "_acme-challenge.";
 
 #[derive(Clone, Debug)]
 enum HandleMessageError {
@@ -155,7 +155,7 @@ fn read_message(
         }
 
         let name = query.name().to_utf8();
-        if !name.starts_with(ACME_CHALLENGE_LABEL) || name == ACME_CHALLENGE_LABEL {
+        if !name.starts_with(ACME_CHALLENGE_PREFIX) || name == ACME_CHALLENGE_PREFIX {
             tracing::debug!(query_name = %name, "ignoring non-acme DNS query");
             continue;
         }
@@ -228,5 +228,142 @@ fn valid_return_address(src_addr: &SocketAddr) -> bool {
             }
         }
     }
-    return true
+    return true;
+}
+
+#[derive(Copy, Clone, Debug)]
+struct QueryHeader {
+    transaction_id: u16,
+    num_questions: u16,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum QueryHeaderError {
+    TooShort,
+    IsReply,
+    NotStandardQuery,
+}
+
+impl QueryHeader {
+    const LENGTH: usize = 12;
+
+    fn from_bytes(bytes: &[u8]) -> Result<QueryHeader, QueryHeaderError> {
+        if bytes.len() < 12 {
+            return Err(QueryHeaderError::TooShort);
+        }
+        let transaction_id = u16_at(bytes, 0);
+
+        if bytes[2] & 0b10000000 != 0 {
+            return Err(QueryHeaderError::IsReply);
+        }
+
+        if bytes[2] & 0b01111000 != 0 {
+            return Err(QueryHeaderError::NotStandardQuery);
+        }
+
+        let num_questions = u16_at(bytes, 4);
+
+        Ok(QueryHeader {
+            transaction_id,
+            num_questions,
+        })
+    }
+}
+
+const TXT_TYPE: u16 = 16;
+const IN_CLASS: u16 = 1;
+const ACME_CHALLENGE_LABEL: &[u8] = b"_acme-challenge";
+
+#[derive(Clone, Debug)]
+struct TXTQuery {
+    query_name_bytes: Vec<u8>,
+    domain_name: String,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum TXTQueryError {
+    TooShort,
+    TooLong,
+    InvalidNameEncoding,
+    NotIN,
+    NotTXT,
+    NotACME,
+}
+
+impl TXTQuery {
+    #[tracing::instrument(skip_all)]
+    fn from_bytes(bytes: &[u8]) -> Result<(TXTQuery, usize), (TXTQueryError, usize)> {
+        let mut labels = vec![];
+        let mut cursor = 0;
+        while cursor < bytes.len() {
+            let label_len = bytes[cursor] as usize;
+            cursor += 1;
+
+            if label_len == 0 {
+                break;
+            }
+
+            if bytes.len() < cursor + label_len {
+                return Err((TXTQueryError::TooShort, 0));
+            }
+            let binary_label = &bytes[cursor..(cursor + label_len)];
+            cursor += label_len;
+            labels.push(binary_label);
+        }
+
+        let full_len = cursor + 4; // FIXME is this right, or off by one?
+
+        if labels.len() == 0 || labels[0] != ACME_CHALLENGE_LABEL {
+            return Err((TXTQueryError::NotACME, full_len));
+        }
+
+        let qtype = u16_at(bytes, cursor);
+        cursor += 2;
+        if qtype != TXT_TYPE {
+            return Err((TXTQueryError::NotTXT, full_len));
+        }
+
+        let qclass = u16_at(bytes, cursor);
+        cursor += 2;
+        if qclass != IN_CLASS {
+            return Err((TXTQueryError::NotIN, full_len));
+        }
+
+        let mut query_name_bytes = Vec::with_capacity(255);
+        let mut domain_name = String::with_capacity(255);
+        for (i, label) in labels.into_iter().enumerate() {
+            if !label.is_ascii() {
+                return Err((TXTQueryError::InvalidNameEncoding, full_len));
+            }
+
+            if i > 0 {
+                let string_label = String::from_utf8(label.to_vec())
+                    .map_err(|_| (TXTQueryError::InvalidNameEncoding, full_len))?;
+                domain_name.extend(string_label.chars());
+                domain_name.push('.');
+            }
+
+            if query_name_bytes.len() + label.len() + 1 > 255 {
+                return Err((TXTQueryError::TooLong, full_len));
+            }
+            query_name_bytes.push(label.len() as u8);
+            query_name_bytes.extend(label);
+        }
+
+        Ok((
+            TXTQuery {
+                query_name_bytes,
+                domain_name,
+            },
+            full_len,
+        ))
+    }
+}
+
+fn write_dns_header(buffer: &mut Vec<u8>) {}
+
+fn write_dns_answer(buffer: &mut Vec<u8>, answer_name: &str, answer_value: &str) {}
+
+fn u16_at(bytes: &[u8], pos: usize) -> u16 {
+    (bytes[pos] as u16).unbounded_shl(8) + bytes[pos + 1] as u16
 }
