@@ -284,6 +284,7 @@ struct TXTQuery {
 enum TXTQueryError {
     TooShort,
     TooLong,
+    InvalidLabelLength,
     InvalidNameEncoding,
     NotIN,
     NotTXT,
@@ -292,22 +293,40 @@ enum TXTQueryError {
 
 impl TXTQuery {
     #[tracing::instrument(skip_all)]
-    fn from_bytes(bytes: &[u8], mut cursor: usize) -> Result<(TXTQuery, usize), (TXTQueryError, usize)> {
+    fn from_bytes(
+        bytes: &[u8],
+        mut cursor: usize,
+    ) -> Result<(TXTQuery, usize), (TXTQueryError, usize)> {
         let mut labels = vec![];
         while cursor < bytes.len() {
-            let label_len = bytes[cursor] as usize;
-            cursor += 1;
-
-            if label_len == 0 {
-                break;
+            match bytes.get(cursor) {
+                Some(len) if len & 0b11000000 == 0 => {
+                    // byte at cursor is a length
+                    match label_at(bytes, cursor) {
+                        Ok((label, new_cursor)) => {
+                            labels.push(label);
+                            cursor = new_cursor;
+                            if label.len() == 0 {
+                                break;
+                            }
+                        }
+                        Err(LabelError::TooShort) => return Err((TXTQueryError::TooShort, 0)),
+                    }
+                }
+                Some(off) if off & 0b11000000 == 0b11000000 => {
+                    // byte at cursor is an offset
+                    let ptr = (off & 0b00111111) as usize;
+                    if ptr >= cursor {
+                        return Err((TXTQueryError::InvalidLabelLength, 0));
+                    }
+                    match label_at(bytes, ptr) {
+                        Ok((label, _)) => labels.push(label),
+                        Err(LabelError::TooShort) => return Err((TXTQueryError::TooShort, 0)),
+                    }
+                }
+                Some(_) => return Err((TXTQueryError::InvalidLabelLength, 0)),
+                None => return Err((TXTQueryError::TooShort, 0)),
             }
-
-            if bytes.len() < cursor + label_len {
-                return Err((TXTQueryError::TooShort, 0));
-            }
-            let binary_label = &bytes[cursor..(cursor + label_len)];
-            cursor += label_len;
-            labels.push(binary_label);
         }
 
         let cursor_at_end = cursor + 4;
@@ -338,8 +357,10 @@ impl TXTQuery {
             if i > 0 {
                 let string_label = String::from_utf8(label.to_vec())
                     .map_err(|_| (TXTQueryError::InvalidNameEncoding, cursor_at_end))?;
+                if i > 1 {
+                    domain_name.push('.');
+                }
                 domain_name.extend(string_label.chars());
-                domain_name.push('.');
             }
 
             if query_name_bytes.len() + label.len() + 1 > 255 {
@@ -365,4 +386,26 @@ fn write_dns_answer(buffer: &mut Vec<u8>, answer_name: &str, answer_value: &str)
 
 fn u16_at(bytes: &[u8], pos: usize) -> u16 {
     (bytes[pos] as u16).unbounded_shl(8) + bytes[pos + 1] as u16
+}
+
+enum LabelError {
+    TooShort,
+}
+
+fn label_at(bytes: &[u8], mut cursor: usize) -> Result<(&[u8], usize), LabelError> {
+    if bytes.len() <= cursor {
+        return Err(LabelError::TooShort);
+    }
+
+    let label_len = bytes[cursor] as usize;
+    cursor += 1;
+
+    if cursor + label_len > bytes.len() {
+        return Err(LabelError::TooShort);
+    }
+
+    let result = &bytes[cursor..(cursor + label_len)];
+    cursor += label_len;
+
+    Ok((result, cursor))
 }
