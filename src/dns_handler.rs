@@ -292,9 +292,8 @@ enum TXTQueryError {
 
 impl TXTQuery {
     #[tracing::instrument(skip_all)]
-    fn from_bytes(bytes: &[u8]) -> Result<(TXTQuery, usize), (TXTQueryError, usize)> {
+    fn from_bytes(bytes: &[u8], mut cursor: usize) -> Result<(TXTQuery, usize), (TXTQueryError, usize)> {
         let mut labels = vec![];
-        let mut cursor = 0;
         while cursor < bytes.len() {
             let label_len = bytes[cursor] as usize;
             cursor += 1;
@@ -311,40 +310,40 @@ impl TXTQuery {
             labels.push(binary_label);
         }
 
-        let full_len = cursor + 4; // FIXME is this right, or off by one?
+        let cursor_at_end = cursor + 4;
 
         if labels.len() == 0 || labels[0] != ACME_CHALLENGE_LABEL {
-            return Err((TXTQueryError::NotACME, full_len));
+            return Err((TXTQueryError::NotACME, cursor_at_end));
         }
 
         let qtype = u16_at(bytes, cursor);
         cursor += 2;
         if qtype != TXT_TYPE {
-            return Err((TXTQueryError::NotTXT, full_len));
+            return Err((TXTQueryError::NotTXT, cursor_at_end));
         }
 
         let qclass = u16_at(bytes, cursor);
         cursor += 2;
         if qclass != IN_CLASS {
-            return Err((TXTQueryError::NotIN, full_len));
+            return Err((TXTQueryError::NotIN, cursor_at_end));
         }
 
         let mut query_name_bytes = Vec::with_capacity(255);
         let mut domain_name = String::with_capacity(255);
         for (i, label) in labels.into_iter().enumerate() {
             if !label.is_ascii() {
-                return Err((TXTQueryError::InvalidNameEncoding, full_len));
+                return Err((TXTQueryError::InvalidNameEncoding, cursor_at_end));
             }
 
             if i > 0 {
                 let string_label = String::from_utf8(label.to_vec())
-                    .map_err(|_| (TXTQueryError::InvalidNameEncoding, full_len))?;
+                    .map_err(|_| (TXTQueryError::InvalidNameEncoding, cursor_at_end))?;
                 domain_name.extend(string_label.chars());
                 domain_name.push('.');
             }
 
             if query_name_bytes.len() + label.len() + 1 > 255 {
-                return Err((TXTQueryError::TooLong, full_len));
+                return Err((TXTQueryError::TooLong, cursor_at_end));
             }
             query_name_bytes.push(label.len() as u8);
             query_name_bytes.extend(label);
@@ -355,7 +354,7 @@ impl TXTQuery {
                 query_name_bytes,
                 domain_name,
             },
-            full_len,
+            cursor_at_end,
         ))
     }
 }
