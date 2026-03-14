@@ -299,33 +299,11 @@ impl TXTQuery {
     ) -> Result<(TXTQuery, usize), (TXTQueryError, usize)> {
         let mut labels = vec![];
         while cursor < bytes.len() {
-            match bytes.get(cursor) {
-                Some(len) if len & 0b11000000 == 0 => {
-                    // byte at cursor is a length
-                    match label_at(bytes, cursor) {
-                        Ok((label, new_cursor)) => {
-                            labels.push(label);
-                            cursor = new_cursor;
-                            if label.len() == 0 {
-                                break;
-                            }
-                        }
-                        Err(LabelError::TooShort) => return Err((TXTQueryError::TooShort, 0)),
-                    }
-                }
-                Some(off) if off & 0b11000000 == 0b11000000 => {
-                    // byte at cursor is an offset
-                    let ptr = (off & 0b00111111) as usize;
-                    if ptr >= cursor {
-                        return Err((TXTQueryError::InvalidLabelLength, 0));
-                    }
-                    match label_at(bytes, ptr) {
-                        Ok((label, _)) => labels.push(label),
-                        Err(LabelError::TooShort) => return Err((TXTQueryError::TooShort, 0)),
-                    }
-                }
-                Some(_) => return Err((TXTQueryError::InvalidLabelLength, 0)),
-                None => return Err((TXTQueryError::TooShort, 0)),
+            let (label, new_cursor) = read_label(bytes, cursor).map_err(|e| (e, 0))?;
+            labels.push(label);
+            cursor = new_cursor;
+            if label.len() == 0 {
+                break;
             }
         }
 
@@ -390,6 +368,31 @@ fn u16_at(bytes: &[u8], pos: usize) -> u16 {
 
 enum LabelError {
     TooShort,
+}
+
+fn read_label(bytes: &[u8], cursor: usize) -> Result<(&[u8], usize), TXTQueryError> {
+    match bytes.get(cursor) {
+        Some(len) if len & 0b11000000 == 0 => {
+            // byte at cursor is a length
+            match label_at(bytes, cursor) {
+                Ok((label, new_cursor)) => return Ok((label, new_cursor)),
+                Err(LabelError::TooShort) => return Err(TXTQueryError::TooShort),
+            }
+        }
+        Some(off) if off & 0b11000000 == 0b11000000 => {
+            // byte at cursor is an offset
+            let ptr = (off & 0b00111111) as usize;
+            if ptr >= cursor {
+                return Err(TXTQueryError::InvalidLabelLength);
+            }
+            match label_at(bytes, ptr) {
+                Ok((label, _)) => return Ok((label, cursor)),
+                Err(LabelError::TooShort) => return Err(TXTQueryError::TooShort),
+            }
+        }
+        Some(_) => return Err(TXTQueryError::InvalidLabelLength),
+        None => return Err(TXTQueryError::TooShort),
+    }
 }
 
 fn label_at(bytes: &[u8], mut cursor: usize) -> Result<(&[u8], usize), LabelError> {
