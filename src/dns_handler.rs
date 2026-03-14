@@ -15,6 +15,7 @@ use std::{
     sync::Arc,
 };
 use tokio::net::UdpSocket;
+use tracing::Instrument;
 
 pub fn make_dns_stream(
     udp_socket: UdpSocket,
@@ -72,7 +73,7 @@ pub fn handle_dns(
             }
             _ => {}
         }
-    });
+    }.instrument(tracing::info_span!("process DNS query", remote_addr = %src_addr)));
 
     return DnsStreamResult::Processing;
 }
@@ -306,6 +307,7 @@ impl TXTQuery {
                 break;
             }
         }
+        tracing::trace!(num_labels = %labels.len(), "parsed query labels");
 
         let cursor_at_end = cursor + 4;
 
@@ -314,13 +316,15 @@ impl TXTQuery {
         }
 
         let qtype = u16_at(bytes, cursor);
+        tracing::trace!(%cursor, %qtype, "parsed query type");
         cursor += 2;
         if qtype != TXT_TYPE {
             return Err((TXTQueryError::NotTXT, cursor_at_end));
         }
 
         let qclass = u16_at(bytes, cursor);
-        cursor += 2;
+        tracing::trace!(%cursor, %qclass, "parsed query class");
+        // cursor += 2;
         if qclass != IN_CLASS {
             return Err((TXTQueryError::NotIN, cursor_at_end));
         }
@@ -366,49 +370,45 @@ fn u16_at(bytes: &[u8], pos: usize) -> u16 {
     (bytes[pos] as u16).unbounded_shl(8) + bytes[pos + 1] as u16
 }
 
-enum LabelError {
-    TooShort,
-}
-
+#[tracing::instrument(skip(bytes))]
 fn read_label(bytes: &[u8], cursor: usize) -> Result<(&[u8], usize), TXTQueryError> {
     match bytes.get(cursor) {
         Some(len) if len & 0b11000000 == 0 => {
-            // byte at cursor is a length
-            match label_at(bytes, cursor) {
-                Ok((label, new_cursor)) => return Ok((label, new_cursor)),
-                Err(LabelError::TooShort) => return Err(TXTQueryError::TooShort),
-            }
+            tracing::trace!("found label at cursor");
+            let (label, new_cursor) = label_at(bytes, cursor)?;
+            return Ok((label, new_cursor));
         }
         Some(off) if off & 0b11000000 == 0b11000000 => {
-            // byte at cursor is an offset
             let ptr = (off & 0b00111111) as usize;
+            tracing::trace!(ptr_offset = %ptr, "found label at pointer");
             if ptr >= cursor {
                 return Err(TXTQueryError::InvalidLabelLength);
             }
-            match label_at(bytes, ptr) {
-                Ok((label, _)) => return Ok((label, cursor)),
-                Err(LabelError::TooShort) => return Err(TXTQueryError::TooShort),
-            }
+            let (label, _) = label_at(bytes, ptr)?;
+            Ok((label, cursor))
         }
         Some(_) => return Err(TXTQueryError::InvalidLabelLength),
         None => return Err(TXTQueryError::TooShort),
     }
 }
 
-fn label_at(bytes: &[u8], mut cursor: usize) -> Result<(&[u8], usize), LabelError> {
+#[tracing::instrument(skip(bytes))]
+fn label_at(bytes: &[u8], mut cursor: usize) -> Result<(&[u8], usize), TXTQueryError> {
     if bytes.len() <= cursor {
-        return Err(LabelError::TooShort);
+        return Err(TXTQueryError::TooShort);
     }
 
     let label_len = bytes[cursor] as usize;
+    tracing::trace!(%cursor, length = %label_len, "parsed label length");
     cursor += 1;
 
     if cursor + label_len > bytes.len() {
-        return Err(LabelError::TooShort);
+        return Err(TXTQueryError::TooShort);
     }
 
     let result = &bytes[cursor..(cursor + label_len)];
     cursor += label_len;
+    tracing::trace!(new_cursor = %cursor, length = %label_len, "parsed label");
 
     Ok((result, cursor))
 }
