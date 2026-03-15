@@ -312,6 +312,8 @@ const ANSWER_TTL: u16 = 30;
 #[derive(Clone, Debug)]
 struct Query {
     query_name_bytes: Vec<u8>,
+    query_type: u16,
+    query_class: u16,
     domain_name: String,
     is_internet: bool,
     is_txt_type: bool,
@@ -327,11 +329,14 @@ enum QueryError {
 }
 
 impl Query {
+    fn size_hint(&self) -> usize {
+        self.query_name_bytes.len() +
+        2 + // u16 (type)
+        2   // u16 (class)
+    }
+
     #[tracing::instrument(skip_all)]
-    fn from_bytes(
-        bytes: &[u8],
-        mut cursor: usize,
-    ) -> Result<(Query, usize), (QueryError, usize)> {
+    fn from_bytes(bytes: &[u8], mut cursor: usize) -> Result<(Query, usize), (QueryError, usize)> {
         let mut labels = vec![];
         while cursor < bytes.len() {
             let (label, new_cursor) = read_label(bytes, cursor).map_err(|e| (e, 0))?;
@@ -345,17 +350,18 @@ impl Query {
 
         let cursor_at_end = cursor + 4;
 
-        let is_acme_challenge = labels.len() > 0 && labels[0].eq_ignore_ascii_case(ACME_CHALLENGE_LABEL);
+        let is_acme_challenge =
+            labels.len() > 0 && labels[0].eq_ignore_ascii_case(ACME_CHALLENGE_LABEL);
 
-        let qtype = u16_at(bytes, cursor);
-        tracing::trace!(%cursor, %qtype, "parsed query type");
+        let query_type = u16_at(bytes, cursor);
+        tracing::trace!(%cursor, %query_type, "parsed query type");
         cursor += 2;
-        let is_txt_type = qtype == TXT_TYPE;
+        let is_txt_type = query_type == TXT_TYPE;
 
-        let qclass = u16_at(bytes, cursor);
-        tracing::trace!(%cursor, %qclass, "parsed query class");
+        let query_class = u16_at(bytes, cursor);
+        tracing::trace!(%cursor, %query_class, "parsed query class");
         // cursor += 2;
-        let is_internet = qclass == IN_CLASS;
+        let is_internet = query_class == IN_CLASS;
 
         let mut query_name_bytes = Vec::with_capacity(255);
         let mut domain_name = String::with_capacity(255);
@@ -383,6 +389,8 @@ impl Query {
         Ok((
             Query {
                 query_name_bytes,
+                query_type,
+                query_class,
                 domain_name,
                 is_txt_type,
                 is_internet,
@@ -391,17 +399,20 @@ impl Query {
             cursor_at_end,
         ))
     }
-}
 
-struct Response {
-    transaction_id: u16,
-    rcode: RCode,
-    query: Option<Query>,
-    answer: Option<Answer>,
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.size_hint());
+
+        bytes.extend(&self.query_name_bytes);
+        bytes.extend(&self.query_type.to_be_bytes());
+        bytes.extend(&self.query_class.to_be_bytes());
+
+        bytes
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
-#[repr(u16)]
+#[repr(u8)]
 enum RCode {
     NoError = 0,
     FormErr = 1,
@@ -417,15 +428,71 @@ struct Answer {
 }
 
 impl Answer {
+    fn size_hint(&self) -> usize {
+        self.name.len() +
+        self.value.len() +
+        2 + // u16 (type)
+        2 + // u16 (class)
+        4 + // u32 (ttl)
+        2 // u16 (data length)
+    }
+
     fn to_bytes(&self) -> Vec<u8> {
-        // length of name, data, type, class, ttl, data length
-        let mut bytes = Vec::with_capacity(self.name.len() + self.value.len() + 2 + 2 + 4 + 2);
+        let mut bytes = Vec::with_capacity(self.size_hint());
+
         bytes.extend(&self.name);
         bytes.extend(&TXT_TYPE.to_be_bytes());
         bytes.extend(&IN_CLASS.to_be_bytes());
         bytes.extend(&ANSWER_TTL.to_be_bytes());
-        bytes.extend(&(self.value.len() as u16).to_be_bytes());
+        let value_len = self.value.len() as u16;
+        let rdata_len = value_len + 1;
+        bytes.extend(&rdata_len.to_be_bytes());
+        bytes.extend(&value_len.to_be_bytes());
         bytes.extend(&self.value);
+
+        bytes
+    }
+}
+
+struct Response {
+    transaction_id: u16,
+    rcode: RCode,
+    query: Option<Query>,
+    answer: Option<Answer>,
+}
+
+impl Response {
+    fn to_bytes(&self) -> Vec<u8> {
+        let answer_len = self
+            .answer
+            .as_ref()
+            .map(|answer| answer.size_hint())
+            .unwrap_or(0);
+        let query_len = self
+            .query
+            .as_ref()
+            .map(|query| query.size_hint())
+            .unwrap_or(0);
+        let mut bytes = Vec::with_capacity(12 + query_len + answer_len);
+
+        bytes.extend(&self.transaction_id.to_be_bytes());
+        bytes.push(0b10000100); // answer_type & authoritative_response
+        bytes.push(0b00100000 & self.rcode as u8); // authentic_data & rcode
+        let num_questions = if self.query.is_some() { 1u32 } else { 0u32 };
+        bytes.extend(&(num_questions.to_be_bytes()));
+        let num_answers = if self.answer.is_some() { 1u32 } else { 0u32};
+        bytes.extend(&(num_answers.to_be_bytes()));
+        bytes.extend(&0u32.to_be_bytes()); // number of authority RRs
+        bytes.extend(&0u32.to_be_bytes()); // number of additional RRs
+
+        if let Some(query) = &self.query {
+            bytes.extend(query.to_bytes());
+        }
+
+        if let Some(answer) = &self.answer {
+            bytes.extend(answer.to_bytes());
+        }
+
         bytes
     }
 }
