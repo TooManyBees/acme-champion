@@ -510,13 +510,13 @@ fn read_label(bytes: &[u8], cursor: usize) -> Result<(&[u8], usize), QueryError>
             return Ok((label, new_cursor));
         }
         Some(off) if off & 0b11000000 == 0b11000000 => {
-            let ptr = (off & 0b00111111) as usize;
+            let ptr = (u16_at(bytes, cursor) & 0b0011111111111111) as usize;
             tracing::trace!(ptr_offset = %ptr, "found label at pointer");
             if ptr >= cursor {
                 return Err(QueryError::InvalidLabelLength);
             }
             let (label, _) = label_at(bytes, ptr)?;
-            Ok((label, cursor))
+            Ok((label, cursor + 2))
         }
         Some(_) => return Err(QueryError::InvalidLabelLength),
         None => return Err(QueryError::TooShort),
