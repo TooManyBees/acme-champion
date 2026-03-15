@@ -275,14 +275,28 @@ fn valid_return_address(src_addr: &SocketAddr) -> bool {
 #[derive(Copy, Clone, Debug)]
 struct QueryHeader {
     transaction_id: u16,
+    message_type: MessageType,
+    opcode: OpCode,
     num_questions: u16,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum MessageType {
+    Query,
+    Reply,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum OpCode {
+    Standard,
+    Inverse,
+    Status,
+    Other,
 }
 
 #[derive(Copy, Clone, Debug)]
 enum QueryHeaderError {
     TooShort,
-    IsReply(QueryHeader),
-    NotStandardQuery(QueryHeader),
 }
 
 impl QueryHeader {
@@ -293,21 +307,28 @@ impl QueryHeader {
             return Err(QueryHeaderError::TooShort);
         }
         let transaction_id = u16_at(bytes, 0);
-        let mut header = QueryHeader {
-            transaction_id,
-            num_questions: 0,
+
+        let message_type = if bytes[2] & 0b10000000 == 0 {
+            MessageType::Query
+        } else {
+            MessageType::Reply
         };
 
-        if bytes[2] & 0b10000000 != 0 {
-            return Err(QueryHeaderError::IsReply(header));
-        }
-
-        if bytes[2] & 0b01111000 != 0 {
-            return Err(QueryHeaderError::NotStandardQuery(header));
-        }
+        let opcode = match (bytes[2] >> 3) & 0b00001111 {
+            0 => OpCode::Standard,
+            1 => OpCode::Inverse,
+            2 => OpCode::Status,
+            _ => OpCode::Other,
+        };
 
         let num_questions = u16_at(bytes, 4);
-        header.num_questions = num_questions;
+
+        let mut header = QueryHeader {
+            transaction_id,
+            message_type,
+            opcode,
+            num_questions,
+        };
 
         Ok(header)
     }
