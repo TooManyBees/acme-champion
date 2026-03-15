@@ -409,7 +409,7 @@ fn write_dns_header(buffer: &mut Vec<u8>) {}
 fn write_dns_answer(buffer: &mut Vec<u8>, answer_name: &str, answer_value: &str) {}
 
 fn u16_at(bytes: &[u8], pos: usize) -> u16 {
-    (bytes[pos] as u16).unbounded_shl(8) + bytes[pos + 1] as u16
+    u16::from_be_bytes([bytes[pos], bytes[pos + 1]])
 }
 
 #[tracing::instrument(skip(bytes))]
