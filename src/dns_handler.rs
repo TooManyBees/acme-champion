@@ -178,50 +178,43 @@ fn read_message(
         return Err(HandleMessageError::DontRespond);
     }
 
-    let query_count = header.query_count() as usize;
-    let mut found = None;
-    for _ in 0..query_count {
-        let query = match LowerQuery::read(&mut decoder) {
-            Ok(q) => q,
-            Err(e) => {
-                tracing::warn!(error = %e, "malformed DNS query");
-                continue;
-            }
-        };
-
-        if !matches!(query.query_type(), RecordType::TXT) {
-            tracing::debug!(query_type = %query.query_type(), "ignoring non-TXT DNS query");
-            continue;
-        }
-
-        let name = query.name().to_utf8();
-        if !name.starts_with(ACME_CHALLENGE_PREFIX) || name == ACME_CHALLENGE_PREFIX {
-            tracing::debug!(query_name = %name, "ignoring non-acme DNS query");
-            continue;
-        }
-
-        let domain_name = query.name().base_name().to_utf8();
-        let domain_name = match domain_name.strip_suffix('.') {
-            Some(name) => name.to_string(),
-            None => domain_name,
-        };
-
-        found = Some((query, domain_name));
-        break;
+    if header.query_count() != 1 {
+        response.set_response_code(ResponseCode::FormErr);
+        return Err(HandleMessageError::ErrorResponse(response));
     }
 
-    match found {
-        Some((query, name)) => {
-            tracing::debug!(query = ?query, "parsed DNS query");
-            response.add_query(query.original().clone());
-            Ok((response, query, name))
+    let query = match LowerQuery::read(&mut decoder) {
+        Ok(q) => q,
+        Err(e) => {
+            tracing::warn!(error = %e, "malformed DNS query");
+            response.set_response_code(ResponseCode::FormErr);
+            return Err(HandleMessageError::ErrorResponse(response));
         }
-        None => {
-            tracing::debug!("no queries found for TXT records");
-            response.set_response_code(ResponseCode::NXDomain);
-            Err(HandleMessageError::ErrorResponse(response))
-        }
+    };
+
+    response.add_query(query.original().clone());
+
+    if !matches!(query.query_type(), RecordType::TXT) {
+        tracing::debug!(query_type = %query.query_type(), "ignoring non-TXT DNS query");
+        response.set_response_code(ResponseCode::Refused);
+        return Err(HandleMessageError::ErrorResponse(response));
     }
+
+    let name = query.name().to_utf8();
+    if !name.starts_with(ACME_CHALLENGE_PREFIX) || name == ACME_CHALLENGE_PREFIX {
+        tracing::debug!(query_name = %name, "ignoring non-acme DNS query");
+        response.set_response_code(ResponseCode::Refused);
+        return Err(HandleMessageError::ErrorResponse(response));
+    }
+
+    let domain_name = query.name().base_name().to_utf8();
+    let domain_name = match domain_name.strip_suffix('.') {
+        Some(name) => name.to_string(),
+        None => domain_name,
+    };
+
+    tracing::debug!(query = ?query, "parsed DNS query");
+    Ok((response, query, domain_name))
 }
 
 fn challenge_rr(query: &LowerQuery, answer: &String) -> Record {
