@@ -68,7 +68,7 @@ pub fn handle_dns(
     let challenges = challenges.clone();
     tokio::task::spawn(async move {
         match handle_request(message, challenges, dns_handle).await {
-            Err(HandleMessageError::ProtoError(e)) => {
+            Err(HandleMessageError::Malformed(e)) => {
                 tracing::error!(error = %e, "error handling DNS request")
             }
             _ => {}
@@ -82,50 +82,86 @@ const ACME_CHALLENGE_PREFIX: &'static str = "_acme-challenge.";
 
 #[derive(Clone, Debug)]
 enum HandleMessageError {
-    SkippingResponse,
-    NoTxtQueries,
-    ProtoError(ProtoError),
+    DontRespond,
+    ErrorResponse(Message),
+    Malformed(ProtoError),
 }
 
 impl From<ProtoError> for HandleMessageError {
     fn from(e: ProtoError) -> Self {
-        HandleMessageError::ProtoError(e)
+        HandleMessageError::Malformed(e)
     }
 }
 
 async fn handle_request(
     message: SerialMessage,
     challenges: Arc<Challenges>,
-    mut response_handler: BufDnsStreamHandle,
+    response_handler: BufDnsStreamHandle,
 ) -> Result<(), HandleMessageError> {
-    let (header, query, name) = read_message(&message)?;
+    let (mut response, query, name) = match read_message(&message) {
+        Ok(result) => result,
+        Err(HandleMessageError::ErrorResponse(response)) => {
+            send_response(response, message.addr(), response_handler)?;
+            return Ok(());
+        }
+        Err(HandleMessageError::Malformed(e)) => {
+            tracing::debug!(error = %e, "error parsing message");
+            todo!("return formerr response (rcode 3)")
+        }
+        Err(HandleMessageError::DontRespond) => return Err(HandleMessageError::DontRespond),
+    };
 
     let challenges = challenges.0.lock().await;
 
     tracing::debug!(?challenges, ?name);
-    let response = match challenges.get(&name) {
+    match challenges.get(&name) {
         Some(answer) => {
             tracing::debug!(challenge_name = %name, "found registered DNS challenge");
-            challenge_response(&header, &query, Some(answer))
+            response.set_response_code(ResponseCode::NoError);
+            response.add_answer(challenge_rr(&query, answer));
         }
         None => {
             tracing::debug!(challenge_name = %name, "DNS challenge not found");
-            challenge_response(&header, &query, None)
+            response.set_response_code(ResponseCode::NXDomain);
         }
     };
+
+    send_response(response, message.addr(), response_handler)?;
+    Ok(())
+}
+
+fn send_response(response: Message, addr: SocketAddr, mut handler: BufDnsStreamHandle) -> Result<(), ProtoError> {
     let mut buffer = Vec::with_capacity(4096);
     let mut encoder = BinEncoder::new(&mut buffer);
     encoder.set_max_size(4096);
     response.emit(&mut encoder)?;
-    response_handler.send(SerialMessage::new(buffer, message.addr()))?;
-
+    handler.send(SerialMessage::new(buffer, addr))?;
+    log_response(&response);
     Ok(())
+}
+
+fn log_response(response: &Message) {
+    if let Some(query) = response.query() {
+        let name_str = query.name.to_ascii();
+        tracing::info!(
+            name = tracing::field::display(name_str),
+            rcode = ?response.response_code(),
+            "answered DNS query",
+        );
+    } else {
+        tracing::info!(
+            rcode = ?response.response_code(),
+            "answered DNS query",
+        );
+    }
 }
 
 fn read_message(
     message: &SerialMessage,
-) -> Result<(Header, LowerQuery, String), HandleMessageError> {
+) -> Result<(Message, LowerQuery, String), HandleMessageError> {
     let mut decoder = BinDecoder::new(message.bytes());
+
+    let mut response = Message::new();
 
     let header = Header::read(&mut decoder).map_err(|e| {
         tracing::warn!(error = %e, "malformed DNS header");
@@ -134,9 +170,12 @@ fn read_message(
 
     tracing::debug!(header = ?header, "parsed DNS header");
 
+    let response_header = Header::response_from_request(&header);
+    response.set_header(response_header);
+
     if header.message_type() == MessageType::Response {
         tracing::debug!("ignoring DNS response");
-        return Err(HandleMessageError::SkippingResponse);
+        return Err(HandleMessageError::DontRespond);
     }
 
     let query_count = header.query_count() as usize;
@@ -174,13 +213,21 @@ fn read_message(
     match found {
         Some((query, name)) => {
             tracing::debug!(query = ?query, "parsed DNS query");
-            Ok((header, query, name))
+            response.add_query(query.original().clone());
+            Ok((response, query, name))
         }
         None => {
             tracing::debug!("no queries found for TXT records");
-            Err(HandleMessageError::NoTxtQueries)
+            response.set_response_code(ResponseCode::NXDomain);
+            Err(HandleMessageError::ErrorResponse(response))
         }
     }
+}
+
+fn challenge_rr(query: &LowerQuery, answer: &String) -> Record {
+    let name = query.original().name().clone();
+    let rdata = RData::TXT(TXT::new(vec![answer.clone()]));
+    Record::from_rdata(name, 30, rdata)
 }
 
 fn challenge_response(
@@ -241,8 +288,8 @@ struct QueryHeader {
 #[derive(Copy, Clone, Debug)]
 enum QueryHeaderError {
     TooShort,
-    IsReply,
-    NotStandardQuery,
+    IsReply(QueryHeader),
+    NotStandardQuery(QueryHeader),
 }
 
 impl QueryHeader {
@@ -253,21 +300,23 @@ impl QueryHeader {
             return Err(QueryHeaderError::TooShort);
         }
         let transaction_id = u16_at(bytes, 0);
+        let mut header = QueryHeader {
+            transaction_id,
+            num_questions: 0,
+        };
 
         if bytes[2] & 0b10000000 != 0 {
-            return Err(QueryHeaderError::IsReply);
+            return Err(QueryHeaderError::IsReply(header));
         }
 
         if bytes[2] & 0b01111000 != 0 {
-            return Err(QueryHeaderError::NotStandardQuery);
+            return Err(QueryHeaderError::NotStandardQuery(header));
         }
 
         let num_questions = u16_at(bytes, 4);
+        header.num_questions = num_questions;
 
-        Ok(QueryHeader {
-            transaction_id,
-            num_questions,
-        })
+        Ok(header)
     }
 }
 
