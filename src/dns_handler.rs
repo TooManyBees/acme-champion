@@ -307,6 +307,7 @@ impl QueryHeader {
 const TXT_TYPE: u16 = 16;
 const IN_CLASS: u16 = 1;
 const ACME_CHALLENGE_LABEL: &[u8] = b"_acme-challenge";
+const ANSWER_TTL: u16 = 30;
 
 #[derive(Clone, Debug)]
 struct Query {
@@ -392,9 +393,42 @@ impl Query {
     }
 }
 
-// fn write_dns_header(buffer: &mut Vec<u8>) {}
+struct Response {
+    transaction_id: u16,
+    rcode: RCode,
+    query: Option<Query>,
+    answer: Option<Answer>,
+}
 
-// fn write_dns_answer(buffer: &mut Vec<u8>, answer_name: &str, answer_value: &str) {}
+#[derive(Copy, Clone, Debug)]
+#[repr(u16)]
+enum RCode {
+    NoError = 0,
+    FormErr = 1,
+    ServErr = 2,
+    NameErr = 3,
+    NotImpl = 4,
+    Refused = 5,
+}
+
+struct Answer {
+    name: Vec<u8>,
+    value: Vec<u8>,
+}
+
+impl Answer {
+    fn to_bytes(&self) -> Vec<u8> {
+        // length of name, data, type, class, ttl, data length
+        let mut bytes = Vec::with_capacity(self.name.len() + self.value.len() + 2 + 2 + 4 + 2);
+        bytes.extend(&self.name);
+        bytes.extend(&TXT_TYPE.to_be_bytes());
+        bytes.extend(&IN_CLASS.to_be_bytes());
+        bytes.extend(&ANSWER_TTL.to_be_bytes());
+        bytes.extend(&(self.value.len() as u16).to_be_bytes());
+        bytes.extend(&self.value);
+        bytes
+    }
+}
 
 fn u16_at(bytes: &[u8], pos: usize) -> u16 {
     u16::from_be_bytes([bytes[pos], bytes[pos + 1]])
