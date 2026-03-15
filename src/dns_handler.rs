@@ -2,7 +2,7 @@ use super::Challenges;
 
 use hickory_proto::{
     ProtoError,
-    op::{Header, LowerQuery, Message, ResponseCode, header::MessageType},
+    op::{Header, LowerQuery, Message, ResponseCode, header::MessageType as HickoryMessageType},
     rr::{rdata::txt::TXT, record_data::RData, record_type::RecordType, resource::Record},
     runtime::TokioRuntimeProvider,
     serialize::binary::{BinDecodable, BinDecoder, BinEncodable, BinEncoder},
@@ -173,7 +173,7 @@ fn read_message(
     let response_header = Header::response_from_request(&header);
     response.set_header(response_header);
 
-    if header.message_type() == MessageType::Response {
+    if header.message_type() == HickoryMessageType::Response {
         tracing::debug!("ignoring DNS response");
         return Err(HandleMessageError::DontRespond);
     }
@@ -339,28 +339,28 @@ const IN_CLASS: u16 = 1;
 const ACME_CHALLENGE_LABEL: &[u8] = b"_acme-challenge";
 
 #[derive(Clone, Debug)]
-struct TXTQuery {
+struct Query {
     query_name_bytes: Vec<u8>,
     domain_name: String,
+    is_internet: bool,
+    is_txt_type: bool,
+    is_acme_challenge: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
-enum TXTQueryError {
+enum QueryError {
     TooShort,
     TooLong,
     InvalidLabelLength,
     InvalidNameEncoding,
-    NotIN,
-    NotTXT,
-    NotACME,
 }
 
-impl TXTQuery {
+impl Query {
     #[tracing::instrument(skip_all)]
     fn from_bytes(
         bytes: &[u8],
         mut cursor: usize,
-    ) -> Result<(TXTQuery, usize), (TXTQueryError, usize)> {
+    ) -> Result<(Query, usize), (QueryError, usize)> {
         let mut labels = vec![];
         while cursor < bytes.len() {
             let (label, new_cursor) = read_label(bytes, cursor).map_err(|e| (e, 0))?;
@@ -374,34 +374,28 @@ impl TXTQuery {
 
         let cursor_at_end = cursor + 4;
 
-        if labels.len() == 0 || !labels[0].eq_ignore_ascii_case(ACME_CHALLENGE_LABEL) {
-            return Err((TXTQueryError::NotACME, cursor_at_end));
-        }
+        let is_acme_challenge = labels.len() > 0 && labels[0].eq_ignore_ascii_case(ACME_CHALLENGE_LABEL);
 
         let qtype = u16_at(bytes, cursor);
         tracing::trace!(%cursor, %qtype, "parsed query type");
         cursor += 2;
-        if qtype != TXT_TYPE {
-            return Err((TXTQueryError::NotTXT, cursor_at_end));
-        }
+        let is_txt_type = qtype == TXT_TYPE;
 
         let qclass = u16_at(bytes, cursor);
         tracing::trace!(%cursor, %qclass, "parsed query class");
         // cursor += 2;
-        if qclass != IN_CLASS {
-            return Err((TXTQueryError::NotIN, cursor_at_end));
-        }
+        let is_internet = qclass == IN_CLASS;
 
         let mut query_name_bytes = Vec::with_capacity(255);
         let mut domain_name = String::with_capacity(255);
         for (i, label) in labels.into_iter().enumerate() {
             if !label.is_ascii() {
-                return Err((TXTQueryError::InvalidNameEncoding, cursor_at_end));
+                return Err((QueryError::InvalidNameEncoding, cursor_at_end));
             }
 
             if i > 0 {
                 let string_label = String::from_utf8(label.to_vec())
-                    .map_err(|_| (TXTQueryError::InvalidNameEncoding, cursor_at_end))?;
+                    .map_err(|_| (QueryError::InvalidNameEncoding, cursor_at_end))?;
                 if i > 1 {
                     domain_name.push('.');
                 }
@@ -409,32 +403,35 @@ impl TXTQuery {
             }
 
             if query_name_bytes.len() + label.len() + 1 > 255 {
-                return Err((TXTQueryError::TooLong, cursor_at_end));
+                return Err((QueryError::TooLong, cursor_at_end));
             }
             query_name_bytes.push(label.len() as u8);
             query_name_bytes.extend(label);
         }
 
         Ok((
-            TXTQuery {
+            Query {
                 query_name_bytes,
                 domain_name,
+                is_txt_type,
+                is_internet,
+                is_acme_challenge,
             },
             cursor_at_end,
         ))
     }
 }
 
-fn write_dns_header(buffer: &mut Vec<u8>) {}
+// fn write_dns_header(buffer: &mut Vec<u8>) {}
 
-fn write_dns_answer(buffer: &mut Vec<u8>, answer_name: &str, answer_value: &str) {}
+// fn write_dns_answer(buffer: &mut Vec<u8>, answer_name: &str, answer_value: &str) {}
 
 fn u16_at(bytes: &[u8], pos: usize) -> u16 {
     u16::from_be_bytes([bytes[pos], bytes[pos + 1]])
 }
 
 #[tracing::instrument(skip(bytes))]
-fn read_label(bytes: &[u8], cursor: usize) -> Result<(&[u8], usize), TXTQueryError> {
+fn read_label(bytes: &[u8], cursor: usize) -> Result<(&[u8], usize), QueryError> {
     match bytes.get(cursor) {
         Some(len) if len & 0b11000000 == 0 => {
             tracing::trace!("found label at cursor");
@@ -445,20 +442,20 @@ fn read_label(bytes: &[u8], cursor: usize) -> Result<(&[u8], usize), TXTQueryErr
             let ptr = (off & 0b00111111) as usize;
             tracing::trace!(ptr_offset = %ptr, "found label at pointer");
             if ptr >= cursor {
-                return Err(TXTQueryError::InvalidLabelLength);
+                return Err(QueryError::InvalidLabelLength);
             }
             let (label, _) = label_at(bytes, ptr)?;
             Ok((label, cursor))
         }
-        Some(_) => return Err(TXTQueryError::InvalidLabelLength),
-        None => return Err(TXTQueryError::TooShort),
+        Some(_) => return Err(QueryError::InvalidLabelLength),
+        None => return Err(QueryError::TooShort),
     }
 }
 
 #[tracing::instrument(skip(bytes))]
-fn label_at(bytes: &[u8], mut cursor: usize) -> Result<(&[u8], usize), TXTQueryError> {
+fn label_at(bytes: &[u8], mut cursor: usize) -> Result<(&[u8], usize), QueryError> {
     if bytes.len() <= cursor {
-        return Err(TXTQueryError::TooShort);
+        return Err(QueryError::TooShort);
     }
 
     let label_len = bytes[cursor] as usize;
@@ -466,7 +463,7 @@ fn label_at(bytes: &[u8], mut cursor: usize) -> Result<(&[u8], usize), TXTQueryE
     cursor += 1;
 
     if cursor + label_len > bytes.len() {
-        return Err(TXTQueryError::TooShort);
+        return Err(QueryError::TooShort);
     }
 
     let result = &bytes[cursor..(cursor + label_len)];
