@@ -106,14 +106,14 @@ async fn handle_request(
         }
         Err(HandleMessageError::Malformed(e)) => {
             tracing::debug!(error = %e, "error parsing message");
-            todo!("return formerr response (rcode 3)")
+            // TODO: send a formerr response
+            return Err(HandleMessageError::DontRespond);
         }
         Err(HandleMessageError::DontRespond) => return Err(HandleMessageError::DontRespond),
     };
 
     let challenges = challenges.0.lock().await;
 
-    tracing::debug!(?challenges, ?name);
     match challenges.get(&name) {
         Some(answer) => {
             tracing::debug!(challenge_name = %name, "found registered DNS challenge");
@@ -221,36 +221,6 @@ fn challenge_rr(query: &LowerQuery, answer: &String) -> Record {
     let name = query.original().name().clone();
     let rdata = RData::TXT(TXT::new(vec![answer.clone()]));
     Record::from_rdata(name, 30, rdata)
-}
-
-fn challenge_response(
-    request_header: &Header,
-    query: &LowerQuery,
-    answer: Option<&String>,
-) -> Message {
-    let mut response_header = Header::response_from_request(request_header);
-    response_header.set_authoritative(true);
-
-    let mut message = Message::new();
-
-    message.add_query(query.original().clone());
-
-    match answer {
-        Some(answer_value) => {
-            response_header.set_response_code(ResponseCode::NoError);
-            let name = query.original().name().clone();
-            let rdata = RData::TXT(TXT::new(vec![answer_value.clone()]));
-            let record = Record::from_rdata(name, 30, rdata);
-            message.add_answer(record);
-        }
-        None => {
-            response_header.set_response_code(ResponseCode::NXDomain);
-        }
-    }
-
-    message.set_header(response_header);
-
-    message
 }
 
 fn valid_return_address(src_addr: &SocketAddr) -> bool {
