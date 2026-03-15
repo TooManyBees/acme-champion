@@ -374,7 +374,7 @@ impl TXTQuery {
 
         let cursor_at_end = cursor + 4;
 
-        if labels.len() == 0 || labels[0] != ACME_CHALLENGE_LABEL {
+        if labels.len() == 0 || !labels[0].eq_ignore_ascii_case(ACME_CHALLENGE_LABEL) {
             return Err((TXTQueryError::NotACME, cursor_at_end));
         }
 
