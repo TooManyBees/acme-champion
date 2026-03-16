@@ -230,6 +230,12 @@ fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
         return ReadMessageResult::DontRespond;
     }
 
+    if header.opcode != OpCode::Standard {
+        tracing::debug!("ignoring non-standard query");
+        response.rcode = RCode::Refused;
+        return ReadMessageResult::EarlyExit(response);
+    }
+
     response.transaction_id = header.transaction_id;
 
     if header.num_questions != 1 {
