@@ -93,6 +93,52 @@ impl From<ProtoError> for HandleMessageError {
     }
 }
 
+async fn handle_request_2(
+    message: SerialMessage,
+    challenges: Arc<Challenges>,
+    mut response_handler: BufDnsStreamHandle,
+) -> Result<(), ProtoError> {
+    let (mut response, query_name, challenge_key) = match response_for_message(message.bytes()) {
+        ReadMessageResult::Process {
+            response,
+            query_name,
+            challenge_key,
+        } => (response, query_name, challenge_key),
+        ReadMessageResult::EarlyExit(response) => {
+            let response_bytes = response.to_bytes();
+            response_handler.send(SerialMessage::new(response_bytes, message.addr()))?;
+            return Ok(());
+        }
+        ReadMessageResult::DontRespond => return Ok(()),
+    };
+
+    let challenges = challenges.0.lock().await;
+
+    match challenges.get(&challenge_key) {
+        Some(value) => {
+            tracing::debug!(challenge_name = %challenge_key, "found registered DNS challenge");
+            response.rcode = RCode::NoError;
+            let answer = Answer {
+                name: query_name,
+                value: value.clone().into_bytes(),
+            };
+            response.answer = Some(answer);
+        }
+        None => {
+            tracing::debug!(challenge_name = %challenge_key, "DNS challenge not found");
+            response.rcode = RCode::NXDomain;
+        }
+    }
+
+    tracing::debug!(?response);
+
+    let response_bytes = response.to_bytes();
+
+    response_handler.send(SerialMessage::new(response_bytes, message.addr()))?;
+
+    Ok(())
+}
+
 async fn handle_request(
     message: SerialMessage,
     challenges: Arc<Challenges>,
@@ -160,7 +206,8 @@ fn log_response(response: &Message) {
 enum ReadMessageResult {
     Process {
         response: Response,
-        domain_name: String,
+        query_name: Vec<u8>,
+        challenge_key: String,
     },
     EarlyExit(Response),
     DontRespond,
@@ -230,7 +277,7 @@ fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
         return ReadMessageResult::EarlyExit(response);
     }
 
-    let domain_name = query
+    let challenge_key = query
         .query_name_string
         .trim_end_matches('.')
         .trim_start_matches(ACME_CHALLENGE_PREFIX)
@@ -238,7 +285,8 @@ fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
 
     ReadMessageResult::Process {
         response,
-        domain_name,
+        query_name: query.query_name_bytes,
+        challenge_key,
     }
 }
 
@@ -379,7 +427,7 @@ impl QueryHeader {
 
         let num_questions = u16_at(bytes, 4);
 
-        let mut header = QueryHeader {
+        let header = QueryHeader {
             transaction_id,
             message_type,
             opcode,
@@ -393,7 +441,7 @@ impl QueryHeader {
 const TXT_TYPE: u16 = 16;
 const IN_CLASS: u16 = 1;
 const ACME_CHALLENGE_LABEL: &[u8] = b"_acme-challenge";
-const ANSWER_TTL: u16 = 30;
+const ANSWER_TTL: u32 = 30;
 
 #[derive(Clone, Debug)]
 struct Query {
@@ -401,8 +449,6 @@ struct Query {
     query_name_string: String,
     query_type: u16,
     query_class: u16,
-    is_internet: bool,
-    is_txt_type: bool,
     is_acme_challenge: bool,
 }
 
@@ -442,16 +488,14 @@ impl Query {
         let query_type = u16_at(bytes, cursor);
         tracing::trace!(%cursor, %query_type, "parsed query type");
         cursor += 2;
-        let is_txt_type = query_type == TXT_TYPE;
 
         let query_class = u16_at(bytes, cursor);
         tracing::trace!(%cursor, %query_class, "parsed query class");
         // cursor += 2;
-        let is_internet = query_class == IN_CLASS;
 
         let mut query_name_bytes = Vec::with_capacity(255);
         let mut query_name_string = String::with_capacity(255);
-        for (i, label) in labels.into_iter().enumerate() {
+        for label in labels {
             if !label.is_ascii() {
                 return Err((QueryError::InvalidNameEncoding, cursor_at_end));
             }
@@ -474,8 +518,6 @@ impl Query {
                 query_name_string,
                 query_type,
                 query_class,
-                is_txt_type,
-                is_internet,
                 is_acme_challenge,
             },
             cursor_at_end,
@@ -498,9 +540,9 @@ impl Query {
 enum RCode {
     NoError = 0,
     FormErr = 1,
-    ServErr = 2,
-    NameErr = 3,
-    NotImpl = 4,
+    // ServErr = 2,
+    NXDomain = 3,
+    // NotImpl = 4,
     Refused = 5,
 }
 
@@ -527,8 +569,8 @@ impl Answer {
         bytes.extend(&TXT_TYPE.to_be_bytes());
         bytes.extend(&IN_CLASS.to_be_bytes());
         bytes.extend(&ANSWER_TTL.to_be_bytes());
-        let value_len = self.value.len() as u16;
-        let rdata_len = value_len + 1;
+        let value_len = self.value.len() as u8;
+        let rdata_len = value_len as u16 + 1; // +1 to account for the value_len byte
         bytes.extend(&rdata_len.to_be_bytes());
         bytes.extend(&value_len.to_be_bytes());
         bytes.extend(&self.value);
@@ -569,14 +611,14 @@ impl Response {
         let mut bytes = Vec::with_capacity(12 + query_len + answer_len);
 
         bytes.extend(&self.transaction_id.to_be_bytes());
-        bytes.push(0b10000100); // answer_type & authoritative_response
-        bytes.push(0b00100000 & self.rcode as u8); // authentic_data & rcode
-        let num_questions = if self.query.is_some() { 1u32 } else { 0u32 };
+        bytes.push(0b10000100); // answer_type | authoritative_response
+        bytes.push(0b00100000 | self.rcode as u8); // authentic_data | rcode
+        let num_questions = if self.query.is_some() { 1u16 } else { 0u16 };
         bytes.extend(&(num_questions.to_be_bytes()));
-        let num_answers = if self.answer.is_some() { 1u32 } else { 0u32 };
+        let num_answers = if self.answer.is_some() { 1u16 } else { 0u16 };
         bytes.extend(&(num_answers.to_be_bytes()));
-        bytes.extend(&0u32.to_be_bytes()); // number of authority RRs
-        bytes.extend(&0u32.to_be_bytes()); // number of additional RRs
+        bytes.extend(&0u16.to_be_bytes()); // number of authority RRs
+        bytes.extend(&0u16.to_be_bytes()); // number of additional RRs
 
         if let Some(query) = &self.query {
             bytes.extend(query.to_bytes());
