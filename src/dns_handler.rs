@@ -66,14 +66,23 @@ pub fn handle_dns(
 
     let dns_handle = dns_handle.with_remote_addr(src_addr);
     let challenges = challenges.clone();
-    tokio::task::spawn(async move {
-        match handle_request(message, challenges, dns_handle).await {
-            Err(HandleMessageError::Malformed(e)) => {
-                tracing::error!(error = %e, "error handling DNS request")
+    tokio::task::spawn(
+        async move {
+            // match handle_request(message, challenges, dns_handle).await {
+            //     Err(HandleMessageError::Malformed(e)) => {
+            //         tracing::error!(error = %e, "error handling DNS request")
+            //     }
+            //     _ => {}
+            // }
+            match handle_request_2(message, challenges, dns_handle).await {
+                Err(e) => {
+                    tracing::error!(error = %e, "error handling DNS request");
+                }
+                _ => {}
             }
-            _ => {}
         }
-    }.instrument(tracing::info_span!("process DNS query", remote_addr = %src_addr)));
+        .instrument(tracing::info_span!("process DNS query", remote_addr = %src_addr)),
+    );
 
     return DnsStreamResult::Processing;
 }
