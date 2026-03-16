@@ -156,6 +156,92 @@ fn log_response(response: &Message) {
     }
 }
 
+#[derive(Clone, Debug)]
+enum ReadMessageResult {
+    Process {
+        response: Response,
+        domain_name: String,
+    },
+    EarlyExit(Response),
+    DontRespond,
+}
+
+fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
+    let mut response = Response::new();
+
+    let header = match QueryHeader::from_bytes(bytes) {
+        Ok(header) => header,
+        Err(QueryHeaderError::TooShort) => {
+            tracing::debug!("ignoring malformed message");
+            return ReadMessageResult::DontRespond;
+        }
+    };
+    tracing::debug!(?header, "parsed DNS header");
+
+    if header.message_type == MessageType::Reply {
+        tracing::debug!("ignoring DNS response");
+        return ReadMessageResult::DontRespond;
+    }
+
+    response.transaction_id = header.transaction_id;
+
+    if header.num_questions != 1 {
+        response.rcode = RCode::FormErr;
+        return ReadMessageResult::EarlyExit(response);
+    }
+
+    let (query, _cursor) = match Query::from_bytes(&bytes, QueryHeader::LENGTH) {
+        Ok(q) => q,
+        Err(e) => {
+            response.rcode = RCode::FormErr;
+            match e {
+                (QueryError::TooShort, _) => {
+                    tracing::debug!("query label length exceeds message size");
+                }
+                (QueryError::TooLong, _) => {
+                    tracing::debug!("query name size exceeds maximum length of 255");
+                }
+                (QueryError::InvalidLabelLength(octet), _) => {
+                    tracing::debug!(octet, "query label length octet is malformed");
+                }
+                (QueryError::InvalidNameEncoding, _) => {
+                    tracing::debug!("query label is not valid ASCII");
+                }
+            }
+            return ReadMessageResult::EarlyExit(response);
+        }
+    };
+
+    tracing::debug!(?query, "parsed DNS query");
+
+    response.query = Some(query.clone());
+
+    // TODO: detect and return hardcoded response to NS query
+
+    if query.query_type != TXT_TYPE {
+        tracing::debug!(query_type = %query.query_type, "ignoring non-TXT DNS query");
+        response.rcode = RCode::Refused;
+        return ReadMessageResult::EarlyExit(response);
+    }
+
+    if !query.is_acme_challenge {
+        tracing::debug!(query_name = %query.query_name_string, "ignoring non-acme DNS query");
+        response.rcode = RCode::Refused;
+        return ReadMessageResult::EarlyExit(response);
+    }
+
+    let domain_name = query
+        .query_name_string
+        .trim_end_matches('.')
+        .trim_start_matches(ACME_CHALLENGE_PREFIX)
+        .to_string();
+
+    ReadMessageResult::Process {
+        response,
+        domain_name,
+    }
+}
+
 fn read_message(
     message: &SerialMessage,
 ) -> Result<(Message, LowerQuery, String), HandleMessageError> {
@@ -312,9 +398,9 @@ const ANSWER_TTL: u16 = 30;
 #[derive(Clone, Debug)]
 struct Query {
     query_name_bytes: Vec<u8>,
+    query_name_string: String,
     query_type: u16,
     query_class: u16,
-    domain_name: String,
     is_internet: bool,
     is_txt_type: bool,
     is_acme_challenge: bool,
@@ -324,7 +410,7 @@ struct Query {
 enum QueryError {
     TooShort,
     TooLong,
-    InvalidLabelLength,
+    InvalidLabelLength(u8),
     InvalidNameEncoding,
 }
 
@@ -364,20 +450,16 @@ impl Query {
         let is_internet = query_class == IN_CLASS;
 
         let mut query_name_bytes = Vec::with_capacity(255);
-        let mut domain_name = String::with_capacity(255);
+        let mut query_name_string = String::with_capacity(255);
         for (i, label) in labels.into_iter().enumerate() {
             if !label.is_ascii() {
                 return Err((QueryError::InvalidNameEncoding, cursor_at_end));
             }
 
-            if i > 0 {
-                let string_label = String::from_utf8(label.to_vec())
-                    .map_err(|_| (QueryError::InvalidNameEncoding, cursor_at_end))?;
-                if i > 1 {
-                    domain_name.push('.');
-                }
-                domain_name.extend(string_label.chars());
-            }
+            let string_label = String::from_utf8(label.to_vec())
+                .map_err(|_| (QueryError::InvalidNameEncoding, cursor_at_end))?;
+            query_name_string.extend(string_label.chars());
+            query_name_string.push('.');
 
             if query_name_bytes.len() + label.len() + 1 > 255 {
                 return Err((QueryError::TooLong, cursor_at_end));
@@ -389,9 +471,9 @@ impl Query {
         Ok((
             Query {
                 query_name_bytes,
+                query_name_string,
                 query_type,
                 query_class,
-                domain_name,
                 is_txt_type,
                 is_internet,
                 is_acme_challenge,
@@ -422,6 +504,7 @@ enum RCode {
     Refused = 5,
 }
 
+#[derive(Clone, Debug)]
 struct Answer {
     name: Vec<u8>,
     value: Vec<u8>,
@@ -454,6 +537,7 @@ impl Answer {
     }
 }
 
+#[derive(Clone, Debug)]
 struct Response {
     transaction_id: u16,
     rcode: RCode,
@@ -462,6 +546,15 @@ struct Response {
 }
 
 impl Response {
+    fn new() -> Self {
+        Response {
+            transaction_id: 0,
+            rcode: RCode::NoError,
+            query: None,
+            answer: None,
+        }
+    }
+
     fn to_bytes(&self) -> Vec<u8> {
         let answer_len = self
             .answer
@@ -480,7 +573,7 @@ impl Response {
         bytes.push(0b00100000 & self.rcode as u8); // authentic_data & rcode
         let num_questions = if self.query.is_some() { 1u32 } else { 0u32 };
         bytes.extend(&(num_questions.to_be_bytes()));
-        let num_answers = if self.answer.is_some() { 1u32 } else { 0u32};
+        let num_answers = if self.answer.is_some() { 1u32 } else { 0u32 };
         bytes.extend(&(num_answers.to_be_bytes()));
         bytes.extend(&0u32.to_be_bytes()); // number of authority RRs
         bytes.extend(&0u32.to_be_bytes()); // number of additional RRs
@@ -504,21 +597,21 @@ fn u16_at(bytes: &[u8], pos: usize) -> u16 {
 #[tracing::instrument(skip(bytes))]
 fn read_label(bytes: &[u8], cursor: usize) -> Result<(&[u8], usize), QueryError> {
     match bytes.get(cursor) {
-        Some(len) if len & 0b11000000 == 0 => {
+        Some(&len) if len & 0b11000000 == 0 => {
             tracing::trace!("found label at cursor");
             let (label, new_cursor) = label_at(bytes, cursor)?;
             return Ok((label, new_cursor));
         }
-        Some(off) if off & 0b11000000 == 0b11000000 => {
+        Some(&off) if off & 0b11000000 == 0b11000000 => {
             let ptr = (u16_at(bytes, cursor) & 0b0011111111111111) as usize;
             tracing::trace!(ptr_offset = %ptr, "found label at pointer");
             if ptr >= cursor {
-                return Err(QueryError::InvalidLabelLength);
+                return Err(QueryError::InvalidLabelLength(off));
             }
             let (label, _) = label_at(bytes, ptr)?;
             Ok((label, cursor + 2))
         }
-        Some(_) => return Err(QueryError::InvalidLabelLength),
+        Some(&octet) => return Err(QueryError::InvalidLabelLength(octet)),
         None => return Err(QueryError::TooShort),
     }
 }
