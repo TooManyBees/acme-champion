@@ -1,5 +1,7 @@
 mod dns_handler;
 mod http_handler;
+// mod hickory_dns;
+
 
 use futures_util::StreamExt;
 use std::collections::HashMap;
