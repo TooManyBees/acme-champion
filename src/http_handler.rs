@@ -47,7 +47,10 @@ impl Service<Request<Incoming>> for ChallengeRegister {
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let challenges = self.challenges.clone();
         Box::pin(async {
-            match (req.method(), req.uri().path()) {
+            let path = req.uri().path().to_string();
+            let method = req.method().clone();
+            let status_code;
+            let resp = match (req.method(), req.uri().path()) {
                 (&Method::GET, "/") => handle_get_challenges(challenges).await,
                 (&Method::POST, path) if path.starts_with(REGISTER_PATH) => {
                     handle_set_challenge(req, challenges).await
@@ -56,7 +59,25 @@ impl Service<Request<Incoming>> for ChallengeRegister {
                     handle_unset_challenge(req, challenges).await
                 }
                 _ => Ok(empty_response(StatusCode::NOT_FOUND)),
-            }
+            };
+            let resp = match resp {
+                Ok(resp) => {
+                    status_code = resp.status();
+                    Ok(resp)
+                }
+                Err(e) => {
+                    status_code = StatusCode::INTERNAL_SERVER_ERROR;
+                    tracing::error!(error = %e);
+                    Ok(empty_response(StatusCode::INTERNAL_SERVER_ERROR))
+                }
+            };
+            tracing::info!(
+                method = %method,
+                path = %path,
+                status_code = %status_code.as_u16(),
+                "served HTTP request",
+            );
+            resp
         })
     }
 }
