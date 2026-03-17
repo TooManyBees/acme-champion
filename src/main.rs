@@ -56,7 +56,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             tracing::error!(error = %e, addr = %addr, "error sending dns response");
                         }
                     }
-                    None => tracing::warn!("received None from dns msg receiver"),
+                    None => {
+                        tracing::error!("dns msg receiver unexpectedly closed");
+                        break;
+                    }
                 }
             }
             _ = shutdown_signal() => {
