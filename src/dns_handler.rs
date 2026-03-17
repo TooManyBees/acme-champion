@@ -1,32 +1,15 @@
+use crate::dns::{Message, Responder};
 use crate::dns::{ReadMessageResult, response_for_message};
 
 use super::Challenges;
 
-use hickory_proto::{
-    ProtoError,
-    op::{Header, LowerQuery, Message, ResponseCode, header::MessageType as HickoryMessageType},
-    rr::{rdata::txt::TXT, record_data::RData, record_type::RecordType, resource::Record},
-    runtime::TokioRuntimeProvider,
-    serialize::binary::{BinDecodable, BinDecoder, BinEncodable, BinEncoder},
-    udp::UdpStream,
-    xfer::{BufDnsStreamHandle, DnsStreamHandle, SerialMessage},
-};
 use std::{
-    io::{Error as IoError, ErrorKind},
+    io::ErrorKind,
     net::{IpAddr, SocketAddr},
     sync::Arc,
 };
-use tokio::net::UdpSocket;
+use tokio::sync::mpsc::error::SendError;
 use tracing::Instrument;
-
-pub fn make_dns_stream(
-    udp_socket: UdpSocket,
-) -> (UdpStream<TokioRuntimeProvider>, BufDnsStreamHandle) {
-    UdpStream::<TokioRuntimeProvider>::with_bound(
-        udp_socket,
-        SocketAddr::from(([255, 255, 255, 254], 0)),
-    )
-}
 
 #[derive(Copy, Clone, Debug)]
 pub enum DnsStreamResult {
@@ -37,13 +20,12 @@ pub enum DnsStreamResult {
 }
 
 pub fn handle_dns(
-    next_message: Option<Result<SerialMessage, IoError>>,
-    dns_handle: BufDnsStreamHandle,
+    next_message: std::io::Result<(Vec<u8>, Responder)>,
     challenges: &Arc<Challenges>,
 ) -> DnsStreamResult {
-    let message = match next_message {
-        Some(Ok(message)) => message,
-        Some(Err(e)) => match e.kind() {
+    let (message, handler) = match next_message {
+        Ok(message) => message,
+        Err(e) => match e.kind() {
             ErrorKind::NotConnected | ErrorKind::ConnectionAborted => {
                 tracing::error!(error = %e, "UDP connection broken");
                 return DnsStreamResult::ConnectionBroken;
@@ -53,30 +35,19 @@ pub fn handle_dns(
                 return DnsStreamResult::ConnectionError;
             }
         },
-        None => {
-            tracing::error!("UDP connection closed");
-            return DnsStreamResult::ConnectionBroken;
-        }
     };
 
-    let src_addr = message.addr();
+    let src_addr = handler.addr();
     tracing::debug!(remote_addr = %src_addr, "new UDP message");
     if !valid_return_address(&src_addr) {
         tracing::warn!(addr = %src_addr, "ignoring DNS request with invalid return address");
         return DnsStreamResult::InvalidReturnAddress;
     }
 
-    let dns_handle = dns_handle.with_remote_addr(src_addr);
     let challenges = challenges.clone();
     tokio::task::spawn(
         async move {
-            // match handle_request(message, challenges, dns_handle).await {
-            //     Err(HandleMessageError::Malformed(e)) => {
-            //         tracing::error!(error = %e, "error handling DNS request")
-            //     }
-            //     _ => {}
-            // }
-            match handle_request_2(message, challenges, dns_handle).await {
+            match handle_request(message, challenges, handler).await {
                 Err(e) => {
                     tracing::error!(error = %e, "error handling DNS request");
                 }
@@ -89,25 +60,12 @@ pub fn handle_dns(
     return DnsStreamResult::Processing;
 }
 
-#[derive(Clone, Debug)]
-enum HandleMessageError {
-    DontRespond,
-    ErrorResponse(Message),
-    Malformed(ProtoError),
-}
-
-impl From<ProtoError> for HandleMessageError {
-    fn from(e: ProtoError) -> Self {
-        HandleMessageError::Malformed(e)
-    }
-}
-
-async fn handle_request_2(
-    message: SerialMessage,
+async fn handle_request(
+    message: Vec<u8>,
     challenges: Arc<Challenges>,
-    mut response_handler: BufDnsStreamHandle,
-) -> Result<(), ProtoError> {
-    let (mut response, query_name, challenge_key) = match response_for_message(message.bytes()) {
+    responder: Responder,
+) -> Result<(), SendError<Message>> {
+    let (mut response, query_name, challenge_key) = match response_for_message(&message) {
         ReadMessageResult::Process {
             response,
             query_name,
@@ -115,7 +73,7 @@ async fn handle_request_2(
         } => (response, query_name, challenge_key),
         ReadMessageResult::EarlyExit(response) => {
             let response_bytes = response.to_bytes();
-            response_handler.send(SerialMessage::new(response_bytes, message.addr()))?;
+            responder.send(response_bytes).await?;
             return Ok(());
         }
         ReadMessageResult::DontRespond => return Ok(()),
@@ -139,7 +97,7 @@ async fn handle_request_2(
 
     let response_bytes = response.to_bytes();
 
-    response_handler.send(SerialMessage::new(response_bytes, message.addr()))?;
+    responder.send(response_bytes).await?;
 
     Ok(())
 }

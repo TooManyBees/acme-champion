@@ -1,9 +1,7 @@
+mod dns;
 mod dns_handler;
 mod http_handler;
-// mod hickory_dns;
 
-
-use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -13,7 +11,8 @@ use tokio::{
     sync::Mutex,
 };
 
-use dns_handler::{DnsStreamResult, handle_dns, make_dns_stream};
+use dns::{Message, UdpStream};
+use dns_handler::{DnsStreamResult, handle_dns};
 use http_handler::handle_http;
 
 #[derive(Debug)]
@@ -35,23 +34,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tracing::error!(addr = %dns_addr, error = %e, "Failed to bind UDP listener");
         e
     })?;
-    let (mut dns_stream, dns_handler) = make_dns_stream(dns_socket);
+    let (dns_stream, mut dns_msg_rx) = UdpStream::new(dns_socket);
     tracing::debug!(addr = %dns_addr, "Listening for UDP traffic");
 
     let challenges = Arc::new(Challenges(Mutex::new(HashMap::new())));
 
+    let mut buf = [0u8; 512];
     loop {
         tokio::select! {
             Ok((stream, _)) = http_listener.accept() => handle_http(stream, &challenges),
-            next = dns_stream.next() => {
-                match handle_dns(next, dns_handler.clone(), &challenges) {
+            next = dns_stream.recv_from(&mut buf) => {
+                match handle_dns(next, &challenges) {
                     DnsStreamResult::ConnectionBroken => break,
                     _ => {}
                 }
-            },
+            }
+            msg = dns_msg_rx.recv() => {
+                match msg {
+                    Some(Message { data, addr }) => {
+                        if let Err(e) = dns_stream.send_to(&data, addr).await {
+                            tracing::error!(error = %e, addr = %addr, "error sending dns response");
+                        }
+                    }
+                    None => tracing::warn!("received None from dns msg receiver"),
+                }
+            }
             _ = shutdown_signal() => {
                 tracing::info!("Received shutdown signal");
                 drop(http_listener);
+                drop(dns_stream);
                 break;
             }
         }
