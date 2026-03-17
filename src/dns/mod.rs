@@ -1,15 +1,17 @@
 mod header;
 mod query;
 mod response;
+mod stream;
 
-pub const TXT_TYPE: u16 = 16;
+const TXT_TYPE: u16 = 16;
 const IN_CLASS: u16 = 1;
 const ACME_CHALLENGE_LABEL: &[u8] = b"_acme-challenge";
 const ACME_CHALLENGE_PREFIX: &'static str = "_acme-challenge.";
 
 use header::{MessageType, OpCode, QueryHeader, QueryHeaderError};
 use query::{Query, QueryError};
-use response::{ResponseCode, Response};
+use response::{Response, ResponseCode};
+pub use stream::{Message, Responder, UdpStream};
 
 fn u16_at(bytes: &[u8], pos: usize) -> u16 {
     u16::from_be_bytes([bytes[pos], bytes[pos + 1]])
