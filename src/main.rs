@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::{net::TcpListener, signal::ctrl_c, sync::Mutex};
+use tokio_stream::StreamExt;
 
 use dns_handler::{DnsStreamResult, bind_udp_stream, handle_dns, send_dns_response};
 use http_handler::handle_http;
@@ -50,14 +51,14 @@ async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     loop {
         tokio::select! {
             Ok((stream, _)) = http_listener.accept() => handle_http(stream, &challenges),
-            next = dns_stream_4.recv_from() => {
+            next = dns_stream_4.next() => {
                 match handle_dns(next, &challenges) {
                     DnsStreamResult::ConnectionBroken => break,
                     _ => {}
                 }
             }
             msg = dns_msg_rx_4.recv() => send_dns_response(&dns_stream_4, msg).await,
-            next = dns_stream_6.recv_from() => {
+            next = dns_stream_6.next() => {
                 match handle_dns(next, &challenges) {
                     DnsStreamResult::ConnectionBroken => break,
                     _ => {}

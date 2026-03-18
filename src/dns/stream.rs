@@ -1,7 +1,11 @@
 use std::io;
 use std::net::SocketAddr;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tokio::io::ReadBuf;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::{Receiver, Sender, channel, error::SendError};
+use tokio_stream::Stream;
 
 #[derive(Clone, Debug)]
 pub struct Message {
@@ -66,5 +70,26 @@ impl UdpStream {
 
     pub async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> io::Result<()> {
         self.socket.send_to(buf, addr).await.map(|_| ())
+    }
+}
+
+impl Stream for UdpStream {
+    type Item = Result<(Vec<u8>, Responder), std::io::Error>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let mut buf = [0u8; 512];
+        let mut buf = ReadBuf::new(&mut buf);
+        match self.socket.poll_recv_from(cx, &mut buf) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(result) => Poll::Ready(Some(result.map(|addr| {
+                let data = buf.filled().to_vec();
+                let sender = self.sender.clone();
+                let responder = Responder { sender, addr };
+                (data, responder)
+            }))),
+        }
     }
 }

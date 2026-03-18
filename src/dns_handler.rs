@@ -46,12 +46,12 @@ pub enum DnsStreamResult {
 }
 
 pub fn handle_dns(
-    next_message: std::io::Result<(Vec<u8>, Responder)>,
+    next_message: Option<std::io::Result<(Vec<u8>, Responder)>>,
     challenges: &Arc<Challenges>,
 ) -> DnsStreamResult {
     let (message, handler) = match next_message {
-        Ok(message) => message,
-        Err(e) => match e.kind() {
+        Some(Ok(message)) => message,
+        Some(Err(e)) => match e.kind() {
             ErrorKind::NotConnected | ErrorKind::ConnectionAborted => {
                 tracing::error!(error = %e, "UDP connection broken");
                 return DnsStreamResult::ConnectionBroken;
@@ -61,6 +61,7 @@ pub fn handle_dns(
                 return DnsStreamResult::ConnectionError;
             }
         },
+        None => unreachable!(),
     };
 
     let src_addr = handler.addr();
