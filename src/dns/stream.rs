@@ -33,18 +33,19 @@ impl Responder {
 pub struct UdpStream {
     socket: UdpSocket,
     sender: Sender<Message>,
+    buf: [u8; 512],
 }
 
 impl UdpStream {
     pub fn new(socket: UdpSocket) -> (UdpStream, Receiver<Message>) {
         let (sender, receiver) = channel(10);
 
-        (UdpStream { socket, sender }, receiver)
+        (UdpStream { socket, sender , buf: [0u8; 512] }, receiver)
     }
 
-    pub async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(Vec<u8>, Responder)> {
-        self.socket.recv_from(buf).await.map(|(len, addr)| {
-            let data = buf[0..len].to_vec();
+    pub async fn recv_from(&mut self) -> io::Result<(Vec<u8>, Responder)> {
+        self.socket.recv_from(&mut self.buf).await.map(|(len, addr)| {
+            let data = self.buf[0..len].to_vec();
             let sender = self.sender.clone();
             let responder = Responder { sender, addr };
             (data, responder)

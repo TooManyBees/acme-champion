@@ -53,27 +53,24 @@ async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tracing::error!(addr = %dns_addr_4, error = %e, "Failed to bind UDP listener");
         e
     })?;
-    let (dns_stream_4, mut dns_msg_rx_4) = UdpStream::new(dns_socket_4);
+    let (mut dns_stream_4, mut dns_msg_rx_4) = UdpStream::new(dns_socket_4);
     tracing::debug!(addr = %dns_addr_4, "Listening for UDP traffic");
-    let (dns_stream_6, mut dns_msg_rx_6) = UdpStream::new(dns_socket_6);
+    let (mut dns_stream_6, mut dns_msg_rx_6) = UdpStream::new(dns_socket_6);
     tracing::debug!(addr = %dns_addr_6, "Listening for UDP traffic");
 
     let challenges = Arc::new(Challenges(Mutex::new(HashMap::new())));
 
-    let mut buf_4 = [0u8; 512];
-    let mut buf_6 = [0u8; 512];
-
     loop {
         tokio::select! {
             Ok((stream, _)) = http_listener.accept() => handle_http(stream, &challenges),
-            next = dns_stream_4.recv_from(&mut buf_4) => {
+            next = dns_stream_4.recv_from() => {
                 match handle_dns(next, &challenges) {
                     DnsStreamResult::ConnectionBroken => break,
                     _ => {}
                 }
             }
             msg = dns_msg_rx_4.recv() => send_dns_response(&dns_stream_4, msg).await,
-            next = dns_stream_6.recv_from(&mut buf_6) => {
+            next = dns_stream_6.recv_from() => {
                 match handle_dns(next, &challenges) {
                     DnsStreamResult::ConnectionBroken => break,
                     _ => {}
