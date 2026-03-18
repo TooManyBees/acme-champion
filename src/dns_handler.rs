@@ -3,7 +3,6 @@ use crate::dns::{ReadMessageResult, Responder, UdpStream, response_for_message};
 use super::Challenges;
 
 use std::{
-    io::ErrorKind,
     net::{IpAddr, SocketAddr},
     sync::Arc,
 };
@@ -21,38 +20,16 @@ pub async fn bind_udp_stream(addr: IpAddr, port: u16) -> std::io::Result<UdpStre
     Ok(UdpStream::new(dns_socket_4))
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum DnsStreamResult {
-    Processing,
-    InvalidReturnAddress,
-    ConnectionBroken,
-    ConnectionError,
-}
-
 pub fn handle_dns(
-    next_message: Option<std::io::Result<(Vec<u8>, Responder)>>,
+    message: Vec<u8>,
+    handler: Responder,
     challenges: &Arc<Challenges>,
-) -> DnsStreamResult {
-    let (message, handler) = match next_message {
-        Some(Ok(message)) => message,
-        Some(Err(e)) => match e.kind() {
-            ErrorKind::NotConnected | ErrorKind::ConnectionAborted => {
-                tracing::error!(error = %e, "UDP connection broken");
-                return DnsStreamResult::ConnectionBroken;
-            }
-            _ => {
-                tracing::error!(error = %e, "UDP connection error");
-                return DnsStreamResult::ConnectionError;
-            }
-        },
-        None => unreachable!(),
-    };
-
+) {
     let src_addr = handler.addr();
     tracing::debug!(remote_addr = %src_addr, "new UDP message");
     if !valid_return_address(&src_addr) {
         tracing::warn!(addr = %src_addr, "ignoring DNS request with invalid return address");
-        return DnsStreamResult::InvalidReturnAddress;
+        return;
     }
 
     let challenges = challenges.clone();
@@ -67,8 +44,6 @@ pub fn handle_dns(
         }
         .instrument(tracing::info_span!("process DNS query", remote_addr = %src_addr)),
     );
-
-    return DnsStreamResult::Processing;
 }
 
 async fn handle_request(

@@ -3,12 +3,19 @@ mod dns_handler;
 mod http_handler;
 
 use std::collections::HashMap;
+use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::pin::pin;
 use std::sync::Arc;
-use tokio::{net::TcpListener, signal::ctrl_c, sync::Mutex};
-use tokio_stream::StreamExt;
+use tokio::{
+    net::{TcpListener, TcpStream},
+    signal::ctrl_c,
+    sync::Mutex,
+};
+use tokio_stream::{StreamExt, wrappers::TcpListenerStream};
 
-use dns_handler::{DnsStreamResult, bind_udp_stream, handle_dns};
+use crate::dns::Responder;
+use dns_handler::{bind_udp_stream, handle_dns};
 use http_handler::handle_http;
 
 #[derive(Debug)]
@@ -35,43 +42,72 @@ async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         tracing::error!(addr = %http_addr, error = %e, "Failed to bind TCP listener");
         e
     })?;
+    let http_stream = TcpListenerStream::new(http_listener);
     tracing::debug!(addr = %http_addr, "Listening for TCP traffic");
 
     let dns_port = 5053u16;
 
-    let mut dns_stream_4 = bind_udp_stream(IpAddr::V4(Ipv4Addr::UNSPECIFIED), dns_port).await?;
-    let mut dns_stream_6 = bind_udp_stream(IpAddr::V6(Ipv6Addr::UNSPECIFIED), dns_port).await?;
+    let dns_stream_4 = bind_udp_stream(IpAddr::V4(Ipv4Addr::UNSPECIFIED), dns_port).await?;
+    let dns_stream_6 = bind_udp_stream(IpAddr::V6(Ipv6Addr::UNSPECIFIED), dns_port).await?;
 
     tracing::info!("Listening for DNS traffic");
 
     let challenges = Arc::new(Challenges(Mutex::new(HashMap::new())));
 
-    loop {
-        tokio::select! {
-            Ok((stream, _)) = http_listener.accept() => handle_http(stream, &challenges),
-            next = dns_stream_4.next() => {
-                match handle_dns(next, &challenges) {
-                    DnsStreamResult::ConnectionBroken => break,
-                    _ => {}
-                }
+    let stream = http_stream
+        .map(handle_tcp_result)
+        .merge(dns_stream_4.map(handle_udp_result))
+        .merge(dns_stream_6.map(handle_udp_result));
+    let mut stream = pin!(stream);
+
+    while let Some(event) = stream.next().await {
+        match event {
+            LoopEvent::NewHttpConn(stream) => {
+                handle_http(stream, &challenges);
             }
-            next = dns_stream_6.next() => {
-                match handle_dns(next, &challenges) {
-                    DnsStreamResult::ConnectionBroken => break,
-                    _ => {}
-                }
+            LoopEvent::NewUdpConn(message, responder) => {
+                handle_dns(message, responder, &challenges);
             }
-            _ = shutdown_signal() => {
-                tracing::info!("Received shutdown signal");
-                drop(http_listener);
-                drop(dns_stream_4);
-                drop(dns_stream_6);
-                break;
-            }
+            LoopEvent::NoOp => {}
+            LoopEvent::Shutdown => break,
         }
     }
 
     Ok(())
+}
+
+enum LoopEvent {
+    NewHttpConn(TcpStream),
+    NewUdpConn(Vec<u8>, Responder),
+    NoOp,
+    Shutdown,
+}
+
+fn handle_tcp_result(result: io::Result<TcpStream>) -> LoopEvent {
+    match result {
+        Ok(stream) => LoopEvent::NewHttpConn(stream),
+        Err(e) => handle_io_error(e),
+    }
+}
+
+fn handle_udp_result(result: io::Result<(Vec<u8>, Responder)>) -> LoopEvent {
+    match result {
+        Ok((message, responder)) => LoopEvent::NewUdpConn(message, responder),
+        Err(e) => handle_io_error(e),
+    }
+}
+
+fn handle_io_error(error: io::Error) -> LoopEvent {
+    match error.kind() {
+        ErrorKind::NotConnected | ErrorKind::ConnectionAborted => {
+            tracing::error!(%error);
+            LoopEvent::Shutdown
+        }
+        _ => {
+            tracing::warn!(%error);
+            LoopEvent::NoOp
+        }
+    }
 }
 
 fn init_tracing() {
