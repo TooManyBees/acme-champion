@@ -6,7 +6,7 @@ use std::sync::Arc;
 use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::{
     Method, Request, Response, StatusCode,
-    body::{Body, Bytes, Incoming},
+    body::{Bytes, Incoming},
     server::conn::http1,
     service::Service,
 };
@@ -52,12 +52,14 @@ impl Service<Request<Incoming>> for ChallengeRegister {
             let status_code;
             let resp = match (req.method(), req.uri().path()) {
                 (&Method::GET, "/") => handle_get_challenges(challenges).await,
+                (_, "/") => Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED)),
                 (&Method::POST, path) if path.starts_with(REGISTER_PATH) => {
                     handle_set_challenge(req, challenges).await
                 }
                 (&Method::DELETE, path) if path.starts_with(REGISTER_PATH) => {
                     handle_unset_challenge(req, challenges).await
                 }
+                (_, path) if path.starts_with(REGISTER_PATH) => Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED)),
                 _ => Ok(empty_response(StatusCode::NOT_FOUND)),
             };
             let resp = match resp {
@@ -98,16 +100,20 @@ async fn handle_set_challenge(
     req: Request<Incoming>,
     challenges: Arc<Challenges>,
 ) -> HyperResponseResult {
-    let body_size = req.body().size_hint().upper().unwrap_or(u64::MAX);
-    if body_size > 1024 {
-        return Ok(empty_response(StatusCode::PAYLOAD_TOO_LARGE));
-    }
-
     let challenge_name = req.uri().path()[REGISTER_PATH.len()..].to_string();
-    let body = req.collect().await?.to_bytes();
-    let challenge_value = match String::from_utf8(body.to_vec()) {
-        Ok(v) => v,
-        Err(_) => return Ok(empty_response(StatusCode::BAD_REQUEST)),
+    let challenge_header = match req.headers().get("X-ACME-Challenge-Value") {
+        Some(value) => value,
+        None => {
+            tracing::warn!(%challenge_name, "ignoring HTTP request without X-ACME-Challenge-Value header");
+            return Ok(empty_response(StatusCode::BAD_REQUEST));
+        }
+    };
+    let challenge_value = match challenge_header.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            tracing::warn!(%challenge_name, "ignoring HTTP request without non-visible ASCII challenge value");
+            return Ok(empty_response(StatusCode::BAD_REQUEST));
+        }
     };
 
     set_challenge(challenges, challenge_name, challenge_value).await;
