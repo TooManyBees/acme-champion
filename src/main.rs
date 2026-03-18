@@ -3,7 +3,7 @@ mod dns_handler;
 mod http_handler;
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::{
     net::{TcpListener, UdpSocket},
@@ -41,49 +41,69 @@ async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     })?;
     tracing::debug!(addr = %http_addr, "Listening for TCP traffic");
 
-    let dns_addr = SocketAddr::from(([0, 0, 0, 0], 5053));
-    let dns_socket = UdpSocket::bind(dns_addr).await.map_err(|e| {
-        tracing::error!(addr = %dns_addr, error = %e, "Failed to bind UDP listener");
+    let dns_port = 5053u16;
+
+    let dns_addr_4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), dns_port);
+    let dns_socket_4 = UdpSocket::bind(dns_addr_4).await.map_err(|e| {
+        tracing::error!(addr = %dns_addr_4, error = %e, "Failed to bind UDP listener");
         e
     })?;
-    let (dns_stream, mut dns_msg_rx) = UdpStream::new(dns_socket);
-    tracing::debug!(addr = %dns_addr, "Listening for UDP traffic");
+    let dns_addr_6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), dns_port);
+    let dns_socket_6 = UdpSocket::bind(dns_addr_6).await.map_err(|e| {
+        tracing::error!(addr = %dns_addr_4, error = %e, "Failed to bind UDP listener");
+        e
+    })?;
+    let (dns_stream_4, mut dns_msg_rx_4) = UdpStream::new(dns_socket_4);
+    tracing::debug!(addr = %dns_addr_4, "Listening for UDP traffic");
+    let (dns_stream_6, mut dns_msg_rx_6) = UdpStream::new(dns_socket_6);
+    tracing::debug!(addr = %dns_addr_6, "Listening for UDP traffic");
 
     let challenges = Arc::new(Challenges(Mutex::new(HashMap::new())));
 
-    let mut buf = [0u8; 512];
+    let mut buf_4 = [0u8; 512];
+    let mut buf_6 = [0u8; 512];
+
     loop {
         tokio::select! {
             Ok((stream, _)) = http_listener.accept() => handle_http(stream, &challenges),
-            next = dns_stream.recv_from(&mut buf) => {
+            next = dns_stream_4.recv_from(&mut buf_4) => {
                 match handle_dns(next, &challenges) {
                     DnsStreamResult::ConnectionBroken => break,
                     _ => {}
                 }
             }
-            msg = dns_msg_rx.recv() => {
-                match msg {
-                    Some(Message { data, addr }) => {
-                        if let Err(e) = dns_stream.send_to(&data, addr).await {
-                            tracing::error!(error = %e, addr = %addr, "error sending dns response");
-                        }
-                    }
-                    None => {
-                        tracing::error!("dns msg receiver unexpectedly closed");
-                        break;
-                    }
+            msg = dns_msg_rx_4.recv() => send_dns_response(&dns_stream_4, msg).await,
+            next = dns_stream_6.recv_from(&mut buf_6) => {
+                match handle_dns(next, &challenges) {
+                    DnsStreamResult::ConnectionBroken => break,
+                    _ => {}
                 }
             }
+            msg = dns_msg_rx_6.recv() => send_dns_response(&dns_stream_6, msg).await,
             _ = shutdown_signal() => {
                 tracing::info!("Received shutdown signal");
                 drop(http_listener);
-                drop(dns_stream);
+                drop(dns_stream_4);
+                drop(dns_stream_6);
                 break;
             }
         }
     }
 
     Ok(())
+}
+
+async fn send_dns_response(stream: &UdpStream, message: Option<Message>) {
+    match message {
+        Some(Message { data, addr }) => {
+            if let Err(e) = stream.send_to(&data, addr).await {
+                tracing::error!(error = %e, addr = %addr, "error sending dns response");
+            }
+        }
+        None => {
+            tracing::error!("dns msg receiver unexpectedly closed");
+        }
+    }
 }
 
 fn init_tracing() {
