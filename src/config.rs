@@ -1,14 +1,17 @@
 use std::fmt;
+use tracing::Level;
 
 #[derive(Debug)]
 pub struct Config {
     pub port: u16,
+    pub loglevel: Level,
 }
 
 #[derive(Debug)]
 pub enum ConfigError {
     InvalidNumber(String),
     MissingArgument(String),
+    UnsupportedOption(String, String),
 }
 
 impl fmt::Display for ConfigError {
@@ -16,12 +19,18 @@ impl fmt::Display for ConfigError {
         match self {
             ConfigError::InvalidNumber(s) => write!(f, "{} is not a 16 bit number", s),
             ConfigError::MissingArgument(s) => write!(f, "{} is missing its following argument", s),
+            ConfigError::UnsupportedOption(opt, flag) => {
+                write!(f, "{} is not supported for {}", opt, flag)
+            }
         }
     }
 }
 
 pub fn parse_config() -> Result<Config, ConfigError> {
-    let mut config = Config { port: 8053 };
+    let mut config = Config {
+        port: 8053,
+        loglevel: Level::INFO,
+    };
 
     let mut args = std::env::args().skip(1);
     while args.len() > 0 {
@@ -34,6 +43,22 @@ pub fn parse_config() -> Result<Config, ConfigError> {
                 }
                 None => return Err(ConfigError::MissingArgument(flag.to_string())),
             },
+            flag @ "-level" => {
+                config.loglevel = match args.next().as_deref() {
+                    Some("trace") => Level::TRACE,
+                    Some("debug") => Level::DEBUG,
+                    Some("info") => Level::INFO,
+                    Some("warn") => Level::WARN,
+                    Some("error") => Level::ERROR,
+                    Some(level) => {
+                        return Err(ConfigError::UnsupportedOption(
+                            level.to_string(),
+                            flag.to_string(),
+                        ));
+                    }
+                    None => return Err(ConfigError::MissingArgument(flag.to_string())),
+                };
+            }
             _ => {}
         }
     }

@@ -13,6 +13,7 @@ use tokio::{
     sync::Mutex,
 };
 use tokio_stream::{StreamExt, wrappers::TcpListenerStream};
+use tracing::Level;
 
 use crate::config::{Config, parse_config};
 use crate::dns::Responder;
@@ -23,15 +24,18 @@ use crate::http_handler::handle_http;
 struct Challenges(Mutex<HashMap<String, String>>);
 
 fn main() {
-    init_tracing();
-
     let config = match parse_config() {
         Ok(c) => c,
         Err(e) => {
-            tracing::error!(error = %e, "error parsing config");
+            let name = std::env::args()
+                .next()
+                .unwrap_or("acme-champion".to_string());
+            eprintln!("{e}\n\nUsage:\n\t{name} [-p HTTP_PORT] [-l LOG_LEVEL]\n");
             std::process::exit(1);
         }
     };
+
+    init_tracing(config.loglevel);
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
@@ -119,12 +123,11 @@ fn handle_io_error(error: io::Error) -> LoopEvent {
     }
 }
 
-fn init_tracing() {
-    use tracing::Level;
+fn init_tracing(level: Level) {
     use tracing_subscriber::{filter::Targets, prelude::*};
     let targets = Targets::new()
         .with_target("hyper", Level::INFO)
-        .with_default(Level::TRACE);
+        .with_default(level);
     let reg = tracing_subscriber::registry();
     let layer = tracing_subscriber::fmt::layer().pretty();
     reg.with(layer.with_filter(targets)).init();
