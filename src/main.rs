@@ -54,9 +54,9 @@ async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let challenges = Arc::new(Challenges(Mutex::new(HashMap::new())));
 
     let stream = http_stream
-        .map(handle_tcp_result)
-        .merge(dns_stream_4.map(handle_udp_result))
-        .merge(dns_stream_6.map(handle_udp_result));
+        .map(handle_tcp_connection)
+        .merge(dns_stream_4.map(handle_udp_connection))
+        .merge(dns_stream_6.map(handle_udp_connection));
     let mut stream = pin!(stream);
 
     while let Some(event) = stream.next().await {
@@ -82,14 +82,14 @@ enum LoopEvent {
     Shutdown,
 }
 
-fn handle_tcp_result(result: io::Result<TcpStream>) -> LoopEvent {
+fn handle_tcp_connection(result: io::Result<TcpStream>) -> LoopEvent {
     match result {
         Ok(stream) => LoopEvent::NewHttpConn(stream),
         Err(e) => handle_io_error(e),
     }
 }
 
-fn handle_udp_result(result: io::Result<(Vec<u8>, Responder)>) -> LoopEvent {
+fn handle_udp_connection(result: io::Result<(Vec<u8>, Responder)>) -> LoopEvent {
     match result {
         Ok((message, responder)) => LoopEvent::NewUdpConn(message, responder),
         Err(e) => handle_io_error(e),
