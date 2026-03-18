@@ -20,12 +20,14 @@ impl Responder {
         self.addr
     }
 
-    pub async fn send(&self, data: Vec<u8>) -> Result<(), SendError<Message>> {
+    pub async fn send(&self, data: Vec<u8>) -> Result<(), SendError<()>> {
         let message = Message {
             data,
             addr: self.addr,
         };
-        self.sender.send(message).await
+        let permit = self.sender.reserve().await?;
+        permit.send(message);
+        Ok(())
     }
 }
 
@@ -40,16 +42,26 @@ impl UdpStream {
     pub fn new(socket: UdpSocket) -> (UdpStream, Receiver<Message>) {
         let (sender, receiver) = channel(10);
 
-        (UdpStream { socket, sender , buf: [0u8; 512] }, receiver)
+        (
+            UdpStream {
+                socket,
+                sender,
+                buf: [0u8; 512],
+            },
+            receiver,
+        )
     }
 
     pub async fn recv_from(&mut self) -> io::Result<(Vec<u8>, Responder)> {
-        self.socket.recv_from(&mut self.buf).await.map(|(len, addr)| {
-            let data = self.buf[0..len].to_vec();
-            let sender = self.sender.clone();
-            let responder = Responder { sender, addr };
-            (data, responder)
-        })
+        self.socket
+            .recv_from(&mut self.buf)
+            .await
+            .map(|(len, addr)| {
+                let data = self.buf[0..len].to_vec();
+                let sender = self.sender.clone();
+                let responder = Responder { sender, addr };
+                (data, responder)
+            })
     }
 
     pub async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> io::Result<()> {

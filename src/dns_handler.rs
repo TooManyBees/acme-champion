@@ -90,7 +90,7 @@ async fn handle_request(
     message: Vec<u8>,
     challenges: Arc<Challenges>,
     responder: Responder,
-) -> Result<(), SendError<Message>> {
+) -> Result<(), SendError<()>> {
     let (mut response, query_name, challenge_key) = match response_for_message(&message) {
         ReadMessageResult::Process {
             response,
