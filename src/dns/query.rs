@@ -24,7 +24,6 @@ impl Query {
         2 // u16 (class)
     }
 
-    #[tracing::instrument(skip_all)]
     pub fn from_bytes(
         bytes: &[u8],
         mut cursor: usize,
@@ -105,7 +104,6 @@ impl Query {
     }
 }
 
-#[tracing::instrument(skip(bytes))]
 fn read_label(bytes: &[u8], cursor: usize) -> Result<(&[u8], usize), QueryError> {
     match bytes.get(cursor) {
         Some(&len) if len & 0b11000000 == 0 => {
@@ -127,7 +125,6 @@ fn read_label(bytes: &[u8], cursor: usize) -> Result<(&[u8], usize), QueryError>
     }
 }
 
-#[tracing::instrument(skip(bytes))]
 fn label_at(bytes: &[u8], mut cursor: usize) -> Result<(&[u8], usize), QueryError> {
     if bytes.len() <= cursor {
         return Err(QueryError::TooShort);

@@ -18,10 +18,22 @@ use http_handler::handle_http;
 #[derive(Debug)]
 struct Challenges(Mutex<HashMap<String, String>>);
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn main() {
     init_tracing();
 
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+        .unwrap();
+
+    if let Err(e) = rt.block_on(main_loop()) {
+        tracing::error!(error = %e);
+    }
+
+    tracing::info!("Shutting down");
+}
+
+async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let http_addr = SocketAddr::from(([127, 0, 0, 1], 8053));
     let http_listener = TcpListener::bind(http_addr).await.map_err(|e| {
         tracing::error!(addr = %http_addr, error = %e, "Failed to bind TCP listener");
@@ -71,7 +83,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     }
 
-    tracing::info!("Shutting down");
     Ok(())
 }
 
