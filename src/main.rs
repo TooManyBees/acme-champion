@@ -5,14 +5,9 @@ mod http_handler;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
-use tokio::{
-    net::{TcpListener, UdpSocket},
-    signal::ctrl_c,
-    sync::Mutex,
-};
+use tokio::{net::TcpListener, signal::ctrl_c, sync::Mutex};
 
-use dns::{Message, UdpStream};
-use dns_handler::{DnsStreamResult, handle_dns};
+use dns_handler::{DnsStreamResult, bind_udp_stream, handle_dns, send_dns_response};
 use http_handler::handle_http;
 
 #[derive(Debug)]
@@ -43,20 +38,12 @@ async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let dns_port = 5053u16;
 
-    let dns_addr_4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), dns_port);
-    let dns_socket_4 = UdpSocket::bind(dns_addr_4).await.map_err(|e| {
-        tracing::error!(addr = %dns_addr_4, error = %e, "Failed to bind UDP listener");
-        e
-    })?;
-    let dns_addr_6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), dns_port);
-    let dns_socket_6 = UdpSocket::bind(dns_addr_6).await.map_err(|e| {
-        tracing::error!(addr = %dns_addr_4, error = %e, "Failed to bind UDP listener");
-        e
-    })?;
-    let (mut dns_stream_4, mut dns_msg_rx_4) = UdpStream::new(dns_socket_4);
-    tracing::debug!(addr = %dns_addr_4, "Listening for UDP traffic");
-    let (mut dns_stream_6, mut dns_msg_rx_6) = UdpStream::new(dns_socket_6);
-    tracing::debug!(addr = %dns_addr_6, "Listening for UDP traffic");
+    let (mut dns_stream_4, mut dns_msg_rx_4) =
+        bind_udp_stream(IpAddr::V4(Ipv4Addr::UNSPECIFIED), dns_port).await?;
+    let (mut dns_stream_6, mut dns_msg_rx_6) =
+        bind_udp_stream(IpAddr::V6(Ipv6Addr::UNSPECIFIED), dns_port).await?;
+
+    tracing::info!("Listening for DNS traffic");
 
     let challenges = Arc::new(Challenges(Mutex::new(HashMap::new())));
 
@@ -88,19 +75,6 @@ async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     Ok(())
-}
-
-async fn send_dns_response(stream: &UdpStream, message: Option<Message>) {
-    match message {
-        Some(Message { data, addr }) => {
-            if let Err(e) = stream.send_to(&data, addr).await {
-                tracing::error!(error = %e, addr = %addr, "error sending dns response");
-            }
-        }
-        None => {
-            tracing::error!("dns msg receiver unexpectedly closed");
-        }
-    }
 }
 
 fn init_tracing() {
