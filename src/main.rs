@@ -1,3 +1,4 @@
+mod config;
 mod dns;
 mod dns_handler;
 mod http_handler;
@@ -13,9 +14,10 @@ use tokio::{
 };
 use tokio_stream::{StreamExt, wrappers::TcpListenerStream};
 
+use crate::config::{Config, parse_config};
 use crate::dns::Responder;
-use dns_handler::{bind_udp_stream, handle_dns};
-use http_handler::handle_http;
+use crate::dns_handler::{bind_udp_stream, handle_dns};
+use crate::http_handler::handle_http;
 
 #[derive(Debug)]
 struct Challenges(Mutex<HashMap<String, String>>);
@@ -23,20 +25,28 @@ struct Challenges(Mutex<HashMap<String, String>>);
 fn main() {
     init_tracing();
 
+    let config = match parse_config() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(error = %e, "error parsing config");
+            std::process::exit(1);
+        }
+    };
+
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .build()
         .unwrap();
 
-    if let Err(e) = rt.block_on(main_loop()) {
+    if let Err(e) = rt.block_on(main_loop(config)) {
         tracing::error!(error = %e);
     }
 
     tracing::info!("Shutting down");
 }
 
-async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let http_addr = SocketAddr::from(([127, 0, 0, 1], 8053));
+async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let http_addr = SocketAddr::from(([127, 0, 0, 1], config.port));
     let http_listener = TcpListener::bind(http_addr).await.map_err(|e| {
         tracing::error!(addr = %http_addr, error = %e, "Failed to bind TCP listener");
         e
