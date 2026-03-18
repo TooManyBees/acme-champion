@@ -9,7 +9,6 @@ use std::pin::pin;
 use std::sync::Arc;
 use tokio::{
     net::{TcpListener, TcpStream},
-    signal::ctrl_c,
     sync::Mutex,
 };
 use tokio_stream::{StreamExt, wrappers::TcpListenerStream};
@@ -119,8 +118,4 @@ fn init_tracing() {
     let reg = tracing_subscriber::registry();
     let layer = tracing_subscriber::fmt::layer().pretty();
     reg.with(layer.with_filter(targets)).init();
-}
-
-async fn shutdown_signal() {
-    ctrl_c().await.expect("failed to install signal handler");
 }

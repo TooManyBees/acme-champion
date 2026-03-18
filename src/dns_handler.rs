@@ -20,11 +20,7 @@ pub async fn bind_udp_stream(addr: IpAddr, port: u16) -> std::io::Result<UdpStre
     Ok(UdpStream::new(dns_socket_4))
 }
 
-pub fn handle_dns(
-    message: Vec<u8>,
-    handler: Responder,
-    challenges: &Arc<Challenges>,
-) {
+pub fn handle_dns(message: Vec<u8>, handler: Responder, challenges: &Arc<Challenges>) {
     let src_addr = handler.addr();
     tracing::debug!(remote_addr = %src_addr, "new UDP message");
     if !valid_return_address(&src_addr) {
