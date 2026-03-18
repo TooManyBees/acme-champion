@@ -11,7 +11,7 @@ const ACME_CHALLENGE_PREFIX: &'static str = "_acme-challenge.";
 use header::{MessageType, OpCode, QueryHeader, QueryHeaderError};
 use query::{Query, QueryError};
 use response::{Response, ResponseCode};
-pub use stream::{Message, Responder, UdpStream};
+pub use stream::{Responder, UdpStream};
 
 fn u16_at(bytes: &[u8], pos: usize) -> u16 {
     u16::from_be_bytes([bytes[pos], bytes[pos + 1]])

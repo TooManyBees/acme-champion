@@ -1,4 +1,4 @@
-use crate::dns::{Message, ReadMessageResult, Responder, UdpStream, response_for_message};
+use crate::dns::{ReadMessageResult, Responder, UdpStream, response_for_message};
 
 use super::Challenges;
 
@@ -8,13 +8,10 @@ use std::{
     sync::Arc,
 };
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc::{Receiver, error::SendError};
+use tokio::sync::mpsc::error::SendError;
 use tracing::Instrument;
 
-pub async fn bind_udp_stream(
-    addr: IpAddr,
-    port: u16,
-) -> std::io::Result<(UdpStream, Receiver<Message>)> {
+pub async fn bind_udp_stream(addr: IpAddr, port: u16) -> std::io::Result<UdpStream> {
     let dns_addr = SocketAddr::new(addr, port);
     let dns_socket_4 = UdpSocket::bind(dns_addr).await.map_err(|e| {
         tracing::error!(addr = %dns_addr, error = %e, "Failed to bind UDP listener");
@@ -22,19 +19,6 @@ pub async fn bind_udp_stream(
     })?;
     tracing::debug!(addr = %dns_addr, "Listening for UDP traffic");
     Ok(UdpStream::new(dns_socket_4))
-}
-
-pub async fn send_dns_response(stream: &UdpStream, message: Option<Message>) {
-    match message {
-        Some(Message { data, addr }) => {
-            if let Err(e) = stream.send_to(&data, addr).await {
-                tracing::error!(error = %e, addr = %addr, "error sending dns response");
-            }
-        }
-        None => {
-            tracing::error!("dns msg receiver unexpectedly closed");
-        }
-    }
 }
 
 #[derive(Copy, Clone, Debug)]

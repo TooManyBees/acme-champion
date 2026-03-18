@@ -1,11 +1,10 @@
-use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::ReadBuf;
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc::{Receiver, Sender, channel, error::SendError};
-use tokio_stream::Stream;
+use tokio::sync::mpsc::{Sender, channel, error::SendError};
+use tokio_stream::{Stream, wrappers::ReceiverStream};
 
 #[derive(Clone, Debug)]
 pub struct Message {
@@ -39,50 +38,45 @@ impl Responder {
 pub struct UdpStream {
     socket: UdpSocket,
     sender: Sender<Message>,
-    buf: [u8; 512],
+    receiver: ReceiverStream<Message>,
 }
 
 impl UdpStream {
-    pub fn new(socket: UdpSocket) -> (UdpStream, Receiver<Message>) {
+    pub fn new(socket: UdpSocket) -> UdpStream {
         let (sender, receiver) = channel(10);
 
-        (
-            UdpStream {
-                socket,
-                sender,
-                buf: [0u8; 512],
-            },
-            receiver,
-        )
+        UdpStream {
+            socket,
+            sender,
+            receiver: ReceiverStream::new(receiver),
+        }
     }
 
-    pub async fn recv_from(&mut self) -> io::Result<(Vec<u8>, Responder)> {
-        self.socket
-            .recv_from(&mut self.buf)
-            .await
-            .map(|(len, addr)| {
-                let data = self.buf[0..len].to_vec();
-                let sender = self.sender.clone();
-                let responder = Responder { sender, addr };
-                (data, responder)
-            })
-    }
-
-    pub async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> io::Result<()> {
-        self.socket.send_to(buf, addr).await.map(|_| ())
+    fn split(&mut self) -> (&mut UdpSocket, &mut ReceiverStream<Message>) {
+        (&mut self.socket, &mut self.receiver)
     }
 }
 
 impl Stream for UdpStream {
     type Item = Result<(Vec<u8>, Responder), std::io::Error>;
 
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let (socket, receiver) = self.split();
+        let mut receiver = Pin::new(receiver);
+
+        while let Poll::Ready(Some(Message { data, addr })) = receiver.as_mut().poll_next(cx) {
+            match socket.poll_send_to(cx, &data, addr) {
+                Poll::Pending => break,
+                Poll::Ready(Err(e)) => {
+                    tracing::error!(error = %e, addr = %addr, "error sending dns response");
+                }
+                Poll::Ready(_) => {}
+            }
+        }
+
         let mut buf = [0u8; 512];
         let mut buf = ReadBuf::new(&mut buf);
-        match self.socket.poll_recv_from(cx, &mut buf) {
+        match socket.poll_recv_from(cx, &mut buf) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(result) => Poll::Ready(Some(result.map(|addr| {
                 let data = buf.filled().to_vec();

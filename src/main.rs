@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::{net::TcpListener, signal::ctrl_c, sync::Mutex};
 use tokio_stream::StreamExt;
 
-use dns_handler::{DnsStreamResult, bind_udp_stream, handle_dns, send_dns_response};
+use dns_handler::{DnsStreamResult, bind_udp_stream, handle_dns};
 use http_handler::handle_http;
 
 #[derive(Debug)]
@@ -39,10 +39,8 @@ async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let dns_port = 5053u16;
 
-    let (mut dns_stream_4, mut dns_msg_rx_4) =
-        bind_udp_stream(IpAddr::V4(Ipv4Addr::UNSPECIFIED), dns_port).await?;
-    let (mut dns_stream_6, mut dns_msg_rx_6) =
-        bind_udp_stream(IpAddr::V6(Ipv6Addr::UNSPECIFIED), dns_port).await?;
+    let mut dns_stream_4 = bind_udp_stream(IpAddr::V4(Ipv4Addr::UNSPECIFIED), dns_port).await?;
+    let mut dns_stream_6 = bind_udp_stream(IpAddr::V6(Ipv6Addr::UNSPECIFIED), dns_port).await?;
 
     tracing::info!("Listening for DNS traffic");
 
@@ -57,14 +55,12 @@ async fn main_loop() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     _ => {}
                 }
             }
-            msg = dns_msg_rx_4.recv() => send_dns_response(&dns_stream_4, msg).await,
             next = dns_stream_6.next() => {
                 match handle_dns(next, &challenges) {
                     DnsStreamResult::ConnectionBroken => break,
                     _ => {}
                 }
             }
-            msg = dns_msg_rx_6.recv() => send_dns_response(&dns_stream_6, msg).await,
             _ = shutdown_signal() => {
                 tracing::info!("Received shutdown signal");
                 drop(http_listener);
