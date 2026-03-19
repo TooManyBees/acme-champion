@@ -61,7 +61,7 @@ async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Sen
     let dns_stream_4 = bind_udp_stream(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.dns_port).await?;
     let dns_stream_6 = bind_udp_stream(IpAddr::V6(Ipv6Addr::UNSPECIFIED), config.dns_port).await?;
 
-    tracing::info!("Listening for DNS traffic");
+    tracing::info!("Listening");
 
     let challenges = Arc::new(Challenges(Mutex::new(HashMap::new())));
 
@@ -73,12 +73,8 @@ async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Sen
 
     while let Some(event) = stream.next().await {
         match event {
-            LoopEvent::NewHttpConn(stream) => {
-                handle_http(stream, &challenges);
-            }
-            LoopEvent::NewUdpConn(message, responder) => {
-                handle_dns(message, responder, &challenges);
-            }
+            LoopEvent::NewHttpConn(stream) => handle_http(stream, &challenges),
+            LoopEvent::NewUdpConn(msg, responder) => handle_dns(msg, responder, &challenges),
             LoopEvent::NoOp => {}
             LoopEvent::Shutdown => break,
         }
