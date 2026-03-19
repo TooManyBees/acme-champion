@@ -34,7 +34,7 @@ pub fn parse_config() -> Result<Config, ConfigError> {
 
     let mut args = std::env::args().skip(1);
     while args.len() > 0 {
-        match args.next().unwrap().as_str() {
+        match args.next().unwrap().to_lowercase().as_str() {
             flag @ "-p" | flag @ "--port" => match args.next() {
                 Some(s) => {
                     let port =
@@ -43,7 +43,7 @@ pub fn parse_config() -> Result<Config, ConfigError> {
                 }
                 None => return Err(ConfigError::MissingArgument(flag.to_string())),
             },
-            flag @ "-level" => {
+            flag @ "-l" | flag @ "--level" => {
                 config.loglevel = match args.next().as_deref() {
                     Some("trace") => Level::TRACE,
                     Some("debug") => Level::DEBUG,
