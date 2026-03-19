@@ -6,7 +6,6 @@ mod stream;
 const TXT_TYPE: u16 = 16;
 const IN_CLASS: u16 = 1;
 const ACME_CHALLENGE_LABEL: &[u8] = b"_acme-challenge";
-const ACME_CHALLENGE_PREFIX: &'static str = "_acme-challenge.";
 
 use header::{MessageType, OpCode, QueryHeader, QueryHeaderError};
 use query::{Query, QueryError};
@@ -96,11 +95,7 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
         return ReadMessageResult::EarlyExit(response);
     }
 
-    let challenge_key = query
-        .query_name_string
-        .trim_end_matches('.')
-        .trim_start_matches(ACME_CHALLENGE_PREFIX)
-        .to_string();
+    let challenge_key = query.query_name_string.trim_end_matches('.').to_string();
 
     ReadMessageResult::Process {
         response,

@@ -59,7 +59,9 @@ impl Service<Request<Incoming>> for ChallengeRegister {
                 (&Method::DELETE, path) if path.starts_with(REGISTER_PATH) => {
                     handle_unset_challenge(req, challenges).await
                 }
-                (_, path) if path.starts_with(REGISTER_PATH) => Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED)),
+                (_, path) if path.starts_with(REGISTER_PATH) => {
+                    Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED))
+                }
                 _ => Ok(empty_response(StatusCode::NOT_FOUND)),
             };
             let resp = match resp {
@@ -100,7 +102,9 @@ async fn handle_set_challenge(
     req: Request<Incoming>,
     challenges: Arc<Challenges>,
 ) -> HyperResponseResult {
-    let challenge_name = req.uri().path()[REGISTER_PATH.len()..].to_string();
+    let challenge_name = req.uri().path()[REGISTER_PATH.len()..]
+        .trim_end_matches('.')
+        .to_string();
     let challenge_header = match req.headers().get("X-ACME-Challenge-Value") {
         Some(value) => value,
         None => {
@@ -133,7 +137,7 @@ async fn handle_unset_challenge(
     req: Request<Incoming>,
     challenges: Arc<Challenges>,
 ) -> HyperResponseResult {
-    let challenge_name = &req.uri().path()[REGISTER_PATH.len()..];
+    let challenge_name = &req.uri().path()[REGISTER_PATH.len()..].trim_end_matches('.');
     unset_challenge(challenges, challenge_name).await;
     Ok(empty_response(StatusCode::NO_CONTENT))
 }
