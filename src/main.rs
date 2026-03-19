@@ -50,7 +50,7 @@ fn main() {
 }
 
 async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let http_addr = SocketAddr::from(([127, 0, 0, 1], config.port));
+    let http_addr = SocketAddr::from(([127, 0, 0, 1], config.http_port));
     let http_listener = TcpListener::bind(http_addr).await.map_err(|e| {
         tracing::error!(addr = %http_addr, error = %e, "Failed to bind TCP listener");
         e
@@ -58,10 +58,8 @@ async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Sen
     let http_stream = TcpListenerStream::new(http_listener);
     tracing::debug!(addr = %http_addr, "Listening for TCP traffic");
 
-    let dns_port = 5053u16;
-
-    let dns_stream_4 = bind_udp_stream(IpAddr::V4(Ipv4Addr::UNSPECIFIED), dns_port).await?;
-    let dns_stream_6 = bind_udp_stream(IpAddr::V6(Ipv6Addr::UNSPECIFIED), dns_port).await?;
+    let dns_stream_4 = bind_udp_stream(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.dns_port).await?;
+    let dns_stream_6 = bind_udp_stream(IpAddr::V6(Ipv6Addr::UNSPECIFIED), config.dns_port).await?;
 
     tracing::info!("Listening for DNS traffic");
 
