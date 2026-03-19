@@ -76,6 +76,7 @@ async fn handle_request(
     }
 
     tracing::debug!(?response);
+    tracing::info!(challenge_name = %challenge_key, rcode = ?response.rcode, "answered DNS query");
 
     let response_bytes = response.to_bytes();
 

@@ -125,10 +125,14 @@ fn handle_io_error(error: io::Error) -> LoopEvent {
 
 fn init_tracing(level: Level) {
     use tracing_subscriber::{filter::Targets, prelude::*};
+
     let targets = Targets::new()
         .with_target("hyper", Level::INFO)
         .with_default(level);
     let reg = tracing_subscriber::registry();
+    #[cfg(debug_assertions)]
     let layer = tracing_subscriber::fmt::layer().pretty();
+    #[cfg(not(debug_assertions))]
+    let layer = tracing_subscriber::fmt::layer().compact().with_ansi(false);
     reg.with(layer.with_filter(targets)).init();
 }
