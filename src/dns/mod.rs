@@ -95,11 +95,9 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
         return ReadMessageResult::EarlyExit(response);
     }
 
-    let challenge_key = query.query_name_string.trim_end_matches('.').to_string();
-
     ReadMessageResult::Process {
         response,
         query_name: query.query_name_bytes,
-        challenge_key,
+        challenge_key: query.query_name_string,
     }
 }

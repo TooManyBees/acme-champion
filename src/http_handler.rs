@@ -1,4 +1,4 @@
-use super::Challenges;
+use super::{Challenge, Challenges};
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -87,12 +87,13 @@ impl Service<Request<Incoming>> for ChallengeRegister {
 }
 
 async fn handle_get_challenges(challenges: Arc<Challenges>) -> HyperResponseResult {
-    let challenges = challenges.0.lock().await;
     let mut result = String::new();
-    for (key, value) in challenges.iter() {
-        result.push_str(key);
+    for challenge in challenges.all().await.iter() {
+        result.push_str(&challenge.domain);
         result.push(' ');
-        result.push_str(value);
+        result.push_str(&challenge.name);
+        result.push(' ');
+        result.push_str(&format!("{:?}", challenge.value));
         result.push('\n');
     }
     Ok(full_response(StatusCode::OK, result))
@@ -102,50 +103,67 @@ async fn handle_set_challenge(
     req: Request<Incoming>,
     challenges: Arc<Challenges>,
 ) -> HyperResponseResult {
-    let challenge_name = req.uri().path()[REGISTER_PATH.len()..]
-        .trim_end_matches('.')
-        .to_string();
-    let challenge_header = match req.headers().get("X-ACME-Challenge-Value") {
-        Some(value) => value,
-        None => {
-            tracing::warn!(%challenge_name, "ignoring HTTP request without X-ACME-Challenge-Value header");
-            return Ok(empty_response(StatusCode::BAD_REQUEST));
-        }
-    };
-    let challenge_value = match challenge_header.to_str() {
-        Ok(s) => s.to_string(),
-        Err(_) => {
-            tracing::warn!(%challenge_name, "ignoring HTTP request without non-visible ASCII challenge value");
-            return Ok(empty_response(StatusCode::BAD_REQUEST));
-        }
+    let challenge = match challenge_from_req(&req) {
+        Ok(c) => c,
+        Err(_) => return Ok(empty_response(StatusCode::BAD_REQUEST)),
     };
 
-    set_challenge(challenges, challenge_name, challenge_value).await;
+    challenges.set(challenge.clone()).await;
+    tracing::info!(domain_name = %challenge.domain, challenge_name = %challenge.name, challenge_value = %challenge.value, "set challenge");
     Ok(empty_response(StatusCode::CREATED))
-}
-
-async fn set_challenge(challenges: Arc<Challenges>, txt_name: String, txt_value: String) {
-    let mut challenges = challenges.0.lock().await;
-    if challenges.contains_key(&txt_name) {
-        tracing::warn!(challenge_name = %txt_name, "overwriting existing challenge");
-    }
-    tracing::info!(challenge_name = %txt_name, challenge_value = %txt_value, "set challenge");
-    challenges.insert(txt_name, txt_value);
 }
 
 async fn handle_unset_challenge(
     req: Request<Incoming>,
     challenges: Arc<Challenges>,
 ) -> HyperResponseResult {
-    let challenge_name = &req.uri().path()[REGISTER_PATH.len()..].trim_end_matches('.');
-    unset_challenge(challenges, challenge_name).await;
+    let challenge = match challenge_from_req(&req) {
+        Ok(c) => c,
+        Err(_) => return Ok(empty_response(StatusCode::BAD_REQUEST)),
+    };
+
+    challenges.cleanup(&challenge).await;
     Ok(empty_response(StatusCode::NO_CONTENT))
 }
 
-async fn unset_challenge(challenges: Arc<Challenges>, txt_name: &str) {
-    let mut challenges = challenges.0.lock().await;
-    tracing::info!(challenge_name = %txt_name, "cleaned up challenge");
-    challenges.remove(txt_name);
+fn challenge_from_req(req: &Request<Incoming>) -> Result<Challenge, ()> {
+    let domain = req.uri().path()[REGISTER_PATH.len()..]
+        .trim_end_matches('.')
+        .to_string();
+    let name_header = match req.headers().get("X-ACME-Challenge-Name") {
+        Some(value) => value,
+        None => {
+            tracing::warn!(domain_name = %domain, "ignoring HTTP request without X-ACME-Challenge-Name header");
+            return Err(());
+        }
+    };
+    let name = match name_header.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            tracing::warn!(domain_name = %domain, "ignoring HTTP request without non-visible ASCII challenge name");
+            return Err(());
+        }
+    };
+    let value_header = match req.headers().get("X-ACME-Challenge-Value") {
+        Some(value) => value,
+        None => {
+            tracing::warn!(domain_name = %domain, challenge_name = %name, "ignoring HTTP request without X-ACME-Challenge-Value header");
+            return Err(());
+        }
+    };
+    let value = match value_header.to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            tracing::warn!(domain_name = %domain, challenge_name = %name, "ignoring HTTP request without non-visible ASCII challenge value");
+            return Err(());
+        }
+    };
+
+    Ok(Challenge {
+        domain,
+        name,
+        value,
+    })
 }
 
 fn empty_response(status_code: StatusCode) -> Response<BoxBody<Bytes, hyper::Error>> {

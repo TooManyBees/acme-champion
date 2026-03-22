@@ -1,27 +1,22 @@
+mod challenges;
 mod config;
 mod dns;
 mod dns_handler;
 mod http_handler;
 
-use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::pin::pin;
 use std::sync::Arc;
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::Mutex,
-};
+use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::{StreamExt, wrappers::TcpListenerStream};
 use tracing::Level;
 
+use crate::challenges::{Challenge, Challenges};
 use crate::config::{Config, parse_config};
 use crate::dns::Responder;
 use crate::dns_handler::{bind_udp_stream, handle_dns};
 use crate::http_handler::handle_http;
-
-#[derive(Debug)]
-struct Challenges(Mutex<HashMap<String, String>>);
 
 fn main() {
     let config = match parse_config() {
@@ -63,7 +58,7 @@ async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Sen
 
     tracing::info!("Listening");
 
-    let challenges = Arc::new(Challenges(Mutex::new(HashMap::new())));
+    let challenges = Arc::new(Challenges::new());
 
     let stream = http_stream
         .map(handle_tcp_connection)

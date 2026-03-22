@@ -61,9 +61,7 @@ async fn handle_request(
         ReadMessageResult::DontRespond => return Ok(()),
     };
 
-    let challenges = challenges.0.lock().await;
-
-    match challenges.get(&challenge_key) {
+    match challenges.get(&challenge_key).await {
         Some(value) => {
             tracing::debug!(challenge_name = %challenge_key, "found registered DNS challenge");
             response.set_rcode_noerror();
