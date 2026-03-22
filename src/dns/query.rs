@@ -61,7 +61,7 @@ impl Query {
 
             let string_label = String::from_utf8(label.to_vec())
                 .map_err(|_| (QueryError::InvalidNameEncoding, cursor_at_end))?;
-            if !query_name_string.is_empty() {
+            if !query_name_string.is_empty() && !string_label.is_empty() {
                 query_name_string.push('.');
             }
             query_name_string.extend(string_label.chars());

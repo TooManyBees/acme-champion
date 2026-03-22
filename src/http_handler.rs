@@ -138,7 +138,7 @@ fn challenge_from_req(req: &Request<Incoming>) -> Result<Challenge, ()> {
         }
     };
     let name = match name_header.to_str() {
-        Ok(s) => s.to_string(),
+        Ok(s) => s.trim_end_matches('.').to_string(),
         Err(_) => {
             tracing::warn!(domain_name = %domain, "ignoring HTTP request without non-visible ASCII challenge name");
             return Err(());
