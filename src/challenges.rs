@@ -30,6 +30,17 @@ impl Challenges {
         None
     }
 
+    pub async fn named(&self, name: &str) -> Vec<String> {
+        let cs = self.0.lock().await;
+        let mut matching = Vec::with_capacity(1);
+        for c in cs.iter() {
+            if c.name == name {
+                matching.push(c.value.clone())
+            }
+        }
+        matching
+    }
+
     pub async fn set(&self, challenge: Challenge) {
         let mut cs = self.0.lock().await;
         cs.push_back(challenge);

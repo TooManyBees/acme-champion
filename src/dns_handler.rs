@@ -61,16 +61,16 @@ async fn handle_request(
         ReadMessageResult::DontRespond => return Ok(()),
     };
 
-    match challenges.get(&challenge_key).await {
-        Some(value) => {
-            tracing::debug!(challenge_name = %challenge_key, "found registered DNS challenge");
-            response.set_rcode_noerror();
-            response.set_answer(query_name, &value);
-        }
-        None => {
-            tracing::debug!(challenge_name = %challenge_key, "DNS challenge not found");
-            response.set_rcode_nxdomain();
-        }
+    for value in challenges.named(&challenge_key).await {
+        response.add_answer(query_name.clone(), value);
+    }
+
+    if response.answers.is_empty() {
+        tracing::debug!(challenge_name = %challenge_key, "DNS challenge not found");
+        response.set_rcode_nxdomain();
+    } else {
+        tracing::debug!(challenge_name = %challenge_key, "found registered DNS challenge");
+        response.set_rcode_noerror();
     }
 
     tracing::debug!(?response);

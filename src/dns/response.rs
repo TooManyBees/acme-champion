@@ -6,7 +6,7 @@ pub struct Response {
     pub recursion_desired: bool,
     pub rcode: ResponseCode,
     pub query: Option<Query>,
-    pub answer: Option<Answer>,
+    pub answers: Vec<Answer>,
 }
 
 impl Response {
@@ -16,7 +16,7 @@ impl Response {
             recursion_desired: header.recursion_desired,
             rcode: ResponseCode::NoError,
             query: None,
-            answer: None,
+            answers: Vec::with_capacity(1),
         }
     }
 
@@ -28,19 +28,15 @@ impl Response {
         self.rcode = ResponseCode::NXDomain;
     }
 
-    pub fn set_answer(&mut self, name: Vec<u8>, value: &str) {
-        self.answer = Some(Answer {
+    pub fn add_answer(&mut self, name: Vec<u8>, value: String) {
+        self.answers.push(Answer {
             name,
-            value: value.to_string().into_bytes(),
-        });
+            value: value.into_bytes(),
+        })
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let answer_len = self
-            .answer
-            .as_ref()
-            .map(|answer| answer.size_hint())
-            .unwrap_or(0);
+        let answer_len: usize = self.answers.iter().map(|answer| answer.size_hint()).sum();
         let query_len = self
             .query
             .as_ref()
@@ -54,8 +50,8 @@ impl Response {
         bytes.push(0b00100000 | self.rcode as u8); // authentic_data | rcode
         let num_questions = if self.query.is_some() { 1u16 } else { 0u16 };
         bytes.extend(&(num_questions.to_be_bytes()));
-        let num_answers = if self.answer.is_some() { 1u16 } else { 0u16 };
-        bytes.extend(&(num_answers.to_be_bytes()));
+        let num_answers = self.answers.len() as u16;
+        bytes.extend(&num_answers.to_be_bytes());
         bytes.extend(&0u16.to_be_bytes()); // number of authority RRs
         bytes.extend(&0u16.to_be_bytes()); // number of additional RRs
 
@@ -63,7 +59,7 @@ impl Response {
             bytes.extend(query.to_bytes());
         }
 
-        if let Some(answer) = &self.answer {
+        for answer in &self.answers {
             bytes.extend(answer.to_bytes());
         }
 
