@@ -44,10 +44,12 @@ impl Response {
     }
 
     pub fn add_ns_answer(&mut self, name: Vec<u8>) {
+        let label_len = name[0] as usize;
+        let value = name[(label_len + 1)..].to_vec();
         self.answers.push(Answer {
             name: name.clone(),
             query_type: ValidQueryType::NS,
-            value: name,
+            value,
         })
     }
 
