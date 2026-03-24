@@ -20,16 +20,6 @@ impl Challenges {
         self.0.lock().await
     }
 
-    pub async fn get(&self, name: &str) -> Option<String> {
-        let cs = self.0.lock().await;
-        for c in cs.iter() {
-            if c.name == name {
-                return Some(c.value.to_string());
-            }
-        }
-        None
-    }
-
     pub async fn any(&self, name: &str) -> bool {
         let cs = self.0.lock().await;
         for c in cs.iter() {
