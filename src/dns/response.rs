@@ -1,4 +1,6 @@
-use super::{IN_CLASS, Query, QueryHeader, TXT_TYPE};
+use super::{Query, QueryHeader, ValidQueryType};
+
+const IN_CLASS: u16 = 1;
 
 #[derive(Clone, Debug)]
 pub struct Response {
@@ -28,10 +30,24 @@ impl Response {
         self.rcode = ResponseCode::NXDomain;
     }
 
-    pub fn add_answer(&mut self, name: Vec<u8>, value: String) {
+    pub fn add_txt_answer(&mut self, name: Vec<u8>, value: String) {
+        let value_len = value.len() as u8;
+        let mut value_bytes = Vec::with_capacity(value.len() + 1);
+        value_bytes.extend(&value_len.to_be_bytes());
+        value_bytes.extend(&value.into_bytes());
+
         self.answers.push(Answer {
             name,
-            value: value.into_bytes(),
+            query_type: ValidQueryType::TXT,
+            value: value_bytes,
+        })
+    }
+
+    pub fn add_ns_answer(&mut self, name: Vec<u8>) {
+        self.answers.push(Answer {
+            name: name.clone(),
+            query_type: ValidQueryType::NS,
+            value: name,
         })
     }
 
@@ -83,6 +99,7 @@ const ANSWER_TTL: u32 = 30;
 #[derive(Clone, Debug)]
 pub struct Answer {
     name: Vec<u8>,
+    query_type: ValidQueryType,
     value: Vec<u8>,
 }
 
@@ -100,13 +117,10 @@ impl Answer {
         let mut bytes = Vec::with_capacity(self.size_hint());
 
         bytes.extend(&self.name);
-        bytes.extend(&TXT_TYPE.to_be_bytes());
+        bytes.extend(&(self.query_type as u16).to_be_bytes());
         bytes.extend(&IN_CLASS.to_be_bytes());
         bytes.extend(&ANSWER_TTL.to_be_bytes());
-        let value_len = self.value.len() as u8;
-        let rdata_len = value_len as u16 + 1; // +1 to account for the value_len byte
-        bytes.extend(&rdata_len.to_be_bytes());
-        bytes.extend(&value_len.to_be_bytes());
+        bytes.extend(&(self.value.len() as u16).to_be_bytes());
         bytes.extend(&self.value);
 
         bytes

@@ -1,4 +1,4 @@
-use super::{ACME_CHALLENGE_LABEL, TXT_TYPE, u16_at};
+use super::{ACME_CHALLENGE_LABEL, u16_at};
 
 #[derive(Clone, Debug)]
 pub struct Query {
@@ -83,10 +83,6 @@ impl Query {
             },
             cursor_at_end,
         ))
-    }
-
-    pub fn is_txt(&self) -> bool {
-        self.query_type == TXT_TYPE
     }
 
     pub fn is_acme_challenge(&self) -> bool {

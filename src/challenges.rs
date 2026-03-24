@@ -30,6 +30,16 @@ impl Challenges {
         None
     }
 
+    pub async fn any(&self, name: &str) -> bool {
+        let cs = self.0.lock().await;
+        for c in cs.iter() {
+            if c.name == name {
+                return true;
+            }
+        }
+        false
+    }
+
     pub async fn named(&self, name: &str) -> Vec<String> {
         let cs = self.0.lock().await;
         let mut matching = Vec::with_capacity(1);

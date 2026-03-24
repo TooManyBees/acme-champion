@@ -3,8 +3,8 @@ mod query;
 mod response;
 mod stream;
 
+const NS_TYPE: u16 = 2;
 const TXT_TYPE: u16 = 16;
-const IN_CLASS: u16 = 1;
 const ACME_CHALLENGE_LABEL: &[u8] = b"_acme-challenge";
 
 use header::{MessageType, OpCode, QueryHeader, QueryHeaderError};
@@ -21,10 +21,18 @@ pub enum ReadMessageResult {
     Process {
         response: Response,
         query_name: Vec<u8>,
+        query_type: ValidQueryType,
         challenge_key: String,
     },
     EarlyExit(Response),
     DontRespond,
+}
+
+#[derive(Copy, Clone, Debug)]
+#[repr(u16)]
+pub enum ValidQueryType {
+    NS = 2,
+    TXT = 16,
 }
 
 pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
@@ -81,13 +89,15 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
 
     response.query = Some(query.clone());
 
-    // TODO: detect and return hardcoded response to NS query
-
-    if !query.is_txt() {
-        tracing::debug!(query_type = %query.query_type, "ignoring non-TXT DNS query");
-        response.rcode = ResponseCode::Refused;
-        return ReadMessageResult::EarlyExit(response);
-    }
+    let query_type = match query.query_type {
+        TXT_TYPE => ValidQueryType::TXT,
+        NS_TYPE => ValidQueryType::NS,
+        query_type => {
+            tracing::debug!(%query_type, "ignoring non-TXT/NS DNS query");
+            response.rcode = ResponseCode::Refused;
+            return ReadMessageResult::EarlyExit(response);
+        }
+    };
 
     if !query.is_acme_challenge() {
         tracing::debug!(query_name = %query.query_name_string, "ignoring non-acme DNS query");
@@ -98,6 +108,7 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
     ReadMessageResult::Process {
         response,
         query_name: query.query_name_bytes,
+        query_type,
         challenge_key: query.query_name_string,
     }
 }

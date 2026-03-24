@@ -1,4 +1,4 @@
-use crate::dns::{ReadMessageResult, Responder, UdpStream, response_for_message};
+use crate::dns::{ReadMessageResult, Responder, UdpStream, ValidQueryType, response_for_message};
 
 use super::Challenges;
 
@@ -47,12 +47,14 @@ async fn handle_request(
     challenges: Arc<Challenges>,
     responder: Responder,
 ) -> Result<(), SendError<()>> {
-    let (mut response, query_name, challenge_key) = match response_for_message(&message) {
+    let (mut response, query_name, query_type, challenge_key) = match response_for_message(&message)
+    {
         ReadMessageResult::Process {
             response,
             query_name,
+            query_type,
             challenge_key,
-        } => (response, query_name, challenge_key),
+        } => (response, query_name, query_type, challenge_key),
         ReadMessageResult::EarlyExit(response) => {
             let response_bytes = response.to_bytes();
             responder.send(response_bytes).await?;
@@ -61,8 +63,17 @@ async fn handle_request(
         ReadMessageResult::DontRespond => return Ok(()),
     };
 
-    for value in challenges.named(&challenge_key).await {
-        response.add_answer(query_name.clone(), value);
+    match query_type {
+        ValidQueryType::TXT => {
+            for value in challenges.named(&challenge_key).await {
+                response.add_txt_answer(query_name.clone(), value);
+            }
+        }
+        ValidQueryType::NS => {
+            if challenges.any(&challenge_key).await {
+                response.add_ns_answer(query_name.clone());
+            }
+        }
     }
 
     if response.answers.is_empty() {
