@@ -20,10 +20,14 @@ use crate::http_handler::handle_http;
 fn main() {
     let config = match parse_config() {
         Ok(c) => c,
-        Err(e) => {
-            match e {
+        Err(error) => {
+            match error {
                 ConfigError::JustPrintUsage => eprintln!("{}", usage()),
-                _ => eprintln!("{e}\n\n{}", usage()),
+                _ => {
+                    init_tracing(Level::ERROR);
+                    tracing::error!(%error, "Could not parse arguments");
+                    eprintln!("{error}\n\n{}", usage());
+                }
             }
             std::process::exit(1);
         }

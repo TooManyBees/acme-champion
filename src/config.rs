@@ -91,7 +91,7 @@ pub fn parse_config() -> Result<Config, ConfigError> {
                             config.dns_addr_6 = Some(addr);
                         }
                     }
-                    Err(_) => return Err(ConfigError::InvalidSocket(flag.to_string())),
+                    Err(_) => return Err(ConfigError::InvalidSocket(s)),
                 },
                 None => return Err(ConfigError::MissingArgument(flag.to_string())),
             },
