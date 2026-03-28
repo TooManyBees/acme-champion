@@ -28,7 +28,7 @@ pub fn handle_dns(message: Vec<u8>, responder: Responder, challenges: &Arc<Chall
     let challenges = challenges.clone();
     tokio::task::spawn(
         async move {
-            if let Some(response) = handle_request(message, challenges).await {
+            if let Some(response) = handle_request(message, challenges) {
                 match responder.send(response).await {
                     Err(e) => {
                         tracing::error!(error = %e, "error handling DNS request");
@@ -41,7 +41,7 @@ pub fn handle_dns(message: Vec<u8>, responder: Responder, challenges: &Arc<Chall
     );
 }
 
-async fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option<Vec<u8>> {
+fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option<Vec<u8>> {
     let (mut response, query_name, query_type, challenge_key) = match response_for_message(&message)
     {
         ReadMessageResult::Process {
@@ -71,7 +71,7 @@ async fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option
             }
         }
         ValidQueryType::SOA => {
-            if challenges.any(&challenge_key).await {
+            if challenges.any(&challenge_key) {
                 response.add_soa_answer(query_name.clone());
             }
         }
