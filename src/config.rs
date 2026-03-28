@@ -35,15 +35,15 @@ impl fmt::Display for ConfigError {
 
 pub fn parse_config() -> Result<Config, ConfigError> {
     let mut config = Config {
-        http_port: std::env::var("HTTP_PORT")
+        http_port: std::env::var("CHAMP_HTTP_PORT")
             .ok()
             .and_then(|s| u16::from_str(&s).ok())
             .unwrap_or(8053),
-        dns_addr_4: std::env::var("DNS_ADDR").ok().and_then(|s| s.parse().ok()),
-        dns_addr_6: std::env::var("DNS_ADDR_6")
+        dns_addr_4: std::env::var("CHAMP_DNS_ADDR").ok().and_then(|s| s.parse().ok()),
+        dns_addr_6: std::env::var("CHAMP_DNS_ADDR_6")
             .ok()
             .and_then(|s| s.parse().ok()),
-        loglevel: std::env::var("LOG_LEVEL")
+        loglevel: std::env::var("CHAMP_LOG_LEVEL")
             .ok()
             .and_then(|s| Level::from_str(&s).ok())
             .unwrap_or(Level::INFO),
@@ -86,7 +86,12 @@ pub fn parse_config() -> Result<Config, ConfigError> {
     }
 
     if config.dns_addr_4.is_none() && config.dns_addr_6.is_none() {
-        config.dns_addr_4 = Some(SocketAddr::new(IpAddr::from([0, 0, 0, 0]), 5053));
+        let default_port = if cfg!(debug_assertions) {
+            5053
+        } else {
+            53
+        };
+        config.dns_addr_4 = Some(SocketAddr::new(IpAddr::from([0, 0, 0, 0]), default_port));
     }
 
     Ok(config)

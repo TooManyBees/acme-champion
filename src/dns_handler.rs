@@ -14,7 +14,6 @@ pub async fn bind_udp_stream(addr: SocketAddr) -> std::io::Result<UdpStream> {
         tracing::error!(%addr, error = %e, "Failed to bind UDP listener");
         e
     })?;
-    tracing::debug!(%addr, "Listening for UDP traffic");
     Ok(UdpStream::new(Arc::new(dns_socket_4)))
 }
 

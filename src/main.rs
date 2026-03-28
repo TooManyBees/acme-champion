@@ -62,6 +62,7 @@ async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Sen
                 let _ = tx.send(event).await;
             }
         });
+        tracing::debug!(addr = %http_addr, "Listening for TCP traffic");
     }
 
     if let Some(addr) = config.dns_addr_4 {
@@ -73,6 +74,7 @@ async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Sen
                 let _ = tx.send(event).await;
             }
         });
+        tracing::debug!(%addr, "Listening for UDP traffic");
     }
 
     if let Some(addr) = config.dns_addr_6 {
@@ -84,9 +86,10 @@ async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Sen
                 let _ = tx.send(event).await;
             }
         });
+        tracing::debug!(%addr, "Listening for UDP traffic");
     }
 
-    tracing::info!("Listening");
+    tracing::info!("Started");
 
     while let Some(event) = rx.recv().await {
         match event {
