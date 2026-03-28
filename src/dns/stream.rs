@@ -1,10 +1,6 @@
 use std::net::SocketAddr;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use tokio::io::ReadBuf;
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc::{Sender, channel, error::SendError};
-use tokio_stream::{Stream, wrappers::ReceiverStream};
+use tokio::sync::mpsc::{Receiver, Sender, channel, error::SendError};
 
 #[derive(Clone, Debug)]
 pub struct Message {
@@ -38,7 +34,7 @@ impl Responder {
 pub struct UdpStream {
     socket: UdpSocket,
     sender: Sender<Message>,
-    receiver: ReceiverStream<Message>,
+    receiver: Receiver<Message>,
 }
 
 impl UdpStream {
@@ -48,42 +44,38 @@ impl UdpStream {
         UdpStream {
             socket,
             sender,
-            receiver: ReceiverStream::new(receiver),
+            receiver,
         }
     }
 
-    fn split(&mut self) -> (&mut UdpSocket, &mut ReceiverStream<Message>) {
+    fn split(&mut self) -> (&mut UdpSocket, &mut Receiver<Message>) {
         (&mut self.socket, &mut self.receiver)
     }
-}
 
-impl Stream for UdpStream {
-    type Item = Result<(Vec<u8>, Responder), std::io::Error>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    pub async fn next(&mut self) -> std::io::Result<(Vec<u8>, Responder)> {
         let (socket, receiver) = self.split();
-        let mut receiver = Pin::new(receiver);
 
-        while let Poll::Ready(Some(Message { data, addr })) = receiver.as_mut().poll_next(cx) {
-            match socket.poll_send_to(cx, &data, addr) {
-                Poll::Pending => break,
-                Poll::Ready(Err(e)) => {
-                    tracing::error!(error = %e, addr = %addr, "error sending dns response");
+        while let Ok(Message { data, addr }) = receiver.try_recv() {
+            match socket.send_to(&data, addr).await {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!(error = %e, addr = %addr, "error sending UDP response");
                 }
-                Poll::Ready(_) => {}
             }
         }
 
         let mut buf = [0u8; 512];
-        let mut buf = ReadBuf::new(&mut buf);
-        match socket.poll_recv_from(cx, &mut buf) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(result) => Poll::Ready(Some(result.map(|addr| {
-                let data = buf.filled().to_vec();
+        match socket.recv_from(&mut buf).await {
+            Ok((len, addr)) => {
+                let data = buf[..len].to_vec();
                 let sender = self.sender.clone();
                 let responder = Responder { sender, addr };
-                (data, responder)
-            }))),
+                Ok((data, responder))
+            }
+            Err(e) => {
+                tracing::error!(error = %e,"error receiving UDP request");
+                Err(e)
+            }
         }
     }
 }

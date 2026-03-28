@@ -5,11 +5,10 @@ mod dns_handler;
 mod http_handler;
 
 use std::io::{self, ErrorKind};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::pin::pin;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_stream::{StreamExt, wrappers::TcpListenerStream};
+use tokio::sync::mpsc::channel;
 use tracing::Level;
 
 use crate::challenges::{Challenge, Challenges};
@@ -50,23 +49,46 @@ async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Sen
         tracing::error!(addr = %http_addr, error = %e, "Failed to bind TCP listener");
         e
     })?;
-    let http_stream = TcpListenerStream::new(http_listener);
-    tracing::debug!(addr = %http_addr, "Listening for TCP traffic");
-
-    let dns_stream_4 = bind_udp_stream(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.dns_port).await?;
-    let dns_stream_6 = bind_udp_stream(IpAddr::V6(Ipv6Addr::UNSPECIFIED), config.dns_port).await?;
-
-    tracing::info!("Listening");
 
     let challenges = Arc::new(Challenges::new());
 
-    let stream = http_stream
-        .map(handle_tcp_connection)
-        .merge(dns_stream_4.map(handle_udp_connection))
-        .merge(dns_stream_6.map(handle_udp_connection));
-    let mut stream = pin!(stream);
+    let (tx, mut rx) = channel(20);
 
-    while let Some(event) = stream.next().await {
+    {
+        let tx = tx.clone();
+        tokio::task::spawn(async move {
+            loop {
+                let event = handle_tcp_connection(http_listener.accept().await);
+                let _ = tx.send(event).await;
+            }
+        });
+    }
+
+    if let Some(addr) = config.dns_addr_4 {
+        let mut udp_stream = bind_udp_stream(addr).await?;
+        let tx = tx.clone();
+        tokio::task::spawn(async move {
+            loop {
+                let event = handle_udp_connection(udp_stream.next().await);
+                let _ = tx.send(event).await;
+            }
+        });
+    }
+
+    if let Some(addr) = config.dns_addr_6 {
+        let mut udp_stream = bind_udp_stream(addr).await?;
+        let tx = tx.clone();
+        tokio::task::spawn(async move {
+            loop {
+                let event = handle_udp_connection(udp_stream.next().await);
+                let _ = tx.send(event).await;
+            }
+        });
+    }
+
+    tracing::info!("Listening");
+
+    while let Some(event) = rx.recv().await {
         match event {
             LoopEvent::NewHttpConn(stream) => handle_http(stream, &challenges),
             LoopEvent::NewUdpConn(msg, responder) => handle_dns(msg, responder, &challenges),
@@ -85,9 +107,9 @@ enum LoopEvent {
     Shutdown,
 }
 
-fn handle_tcp_connection(result: io::Result<TcpStream>) -> LoopEvent {
+fn handle_tcp_connection(result: io::Result<(TcpStream, SocketAddr)>) -> LoopEvent {
     match result {
-        Ok(stream) => LoopEvent::NewHttpConn(stream),
+        Ok((stream, _)) => LoopEvent::NewHttpConn(stream),
         Err(e) => handle_io_error(e),
     }
 }

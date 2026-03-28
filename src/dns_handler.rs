@@ -10,13 +10,12 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc::error::SendError;
 use tracing::Instrument;
 
-pub async fn bind_udp_stream(addr: IpAddr, port: u16) -> std::io::Result<UdpStream> {
-    let dns_addr = SocketAddr::new(addr, port);
-    let dns_socket_4 = UdpSocket::bind(dns_addr).await.map_err(|e| {
-        tracing::error!(addr = %dns_addr, error = %e, "Failed to bind UDP listener");
+pub async fn bind_udp_stream(addr: SocketAddr) -> std::io::Result<UdpStream> {
+    let dns_socket_4 = UdpSocket::bind(addr).await.map_err(|e| {
+        tracing::error!(%addr, error = %e, "Failed to bind UDP listener");
         e
     })?;
-    tracing::debug!(addr = %dns_addr, "Listening for UDP traffic");
+    tracing::debug!(%addr, "Listening for UDP traffic");
     Ok(UdpStream::new(dns_socket_4))
 }
 
