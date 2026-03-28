@@ -1,5 +1,6 @@
 use super::{Challenge, Challenges};
 
+use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -13,7 +14,7 @@ use hyper::{
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 
-type HyperBodyResponse = Response<BoxBody<Bytes, hyper::Error>>;
+type HyperBodyResponse = Response<BoxBody<Bytes, Infallible>>;
 type HyperResponseResult = Result<HyperBodyResponse, hyper::Error>;
 
 pub fn handle_http(stream: TcpStream, challenges: &Arc<Challenges>) {
@@ -40,7 +41,7 @@ impl ChallengeRegister {
 const REGISTER_PATH: &'static str = "/register/";
 
 impl Service<Request<Incoming>> for ChallengeRegister {
-    type Response = Response<BoxBody<Bytes, hyper::Error>>;
+    type Response = HyperBodyResponse;
     type Error = hyper::Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -166,29 +167,14 @@ fn challenge_from_req(req: &Request<Incoming>) -> Result<Challenge, ()> {
     })
 }
 
-fn empty_response(status_code: StatusCode) -> Response<BoxBody<Bytes, hyper::Error>> {
-    let mut resp = Response::new(empty_body());
+fn empty_response(status_code: StatusCode) -> HyperBodyResponse {
+    let mut resp = Response::new(Empty::new().boxed());
     *resp.status_mut() = status_code;
     resp
 }
 
-fn empty_body() -> BoxBody<Bytes, hyper::Error> {
-    Empty::<Bytes>::new()
-        .map_err(|never| match never {})
-        .boxed()
-}
-
-fn full_response<T: Into<Bytes>>(
-    status_code: StatusCode,
-    chunk: T,
-) -> Response<BoxBody<Bytes, hyper::Error>> {
-    let mut resp = Response::new(full_body(chunk));
+fn full_response<T: Into<Bytes>>(status_code: StatusCode, chunk: T) -> HyperBodyResponse {
+    let mut resp = Response::new(Full::new(chunk.into()).boxed());
     *resp.status_mut() = status_code;
     resp
-}
-
-fn full_body<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
-    Full::new(chunk.into())
-        .map_err(|never| match never {})
-        .boxed()
 }

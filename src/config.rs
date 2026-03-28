@@ -39,7 +39,9 @@ pub fn parse_config() -> Result<Config, ConfigError> {
             .ok()
             .and_then(|s| u16::from_str(&s).ok())
             .unwrap_or(8053),
-        dns_addr_4: std::env::var("CHAMP_DNS_ADDR").ok().and_then(|s| s.parse().ok()),
+        dns_addr_4: std::env::var("CHAMP_DNS_ADDR")
+            .ok()
+            .and_then(|s| s.parse().ok()),
         dns_addr_6: std::env::var("CHAMP_DNS_ADDR_6")
             .ok()
             .and_then(|s| s.parse().ok()),
@@ -86,11 +88,7 @@ pub fn parse_config() -> Result<Config, ConfigError> {
     }
 
     if config.dns_addr_4.is_none() && config.dns_addr_6.is_none() {
-        let default_port = if cfg!(debug_assertions) {
-            5053
-        } else {
-            53
-        };
+        let default_port = if cfg!(debug_assertions) { 5053 } else { 53 };
         config.dns_addr_4 = Some(SocketAddr::new(IpAddr::from([0, 0, 0, 0]), default_port));
     }
 
