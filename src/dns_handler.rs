@@ -7,7 +7,6 @@ use std::{
     sync::Arc,
 };
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc::error::SendError;
 use tracing::Instrument;
 
 pub async fn bind_udp_stream(addr: SocketAddr) -> std::io::Result<UdpStream> {
@@ -16,7 +15,7 @@ pub async fn bind_udp_stream(addr: SocketAddr) -> std::io::Result<UdpStream> {
         e
     })?;
     tracing::debug!(%addr, "Listening for UDP traffic");
-    Ok(UdpStream::new(dns_socket_4))
+    Ok(UdpStream::new(Arc::new(dns_socket_4)))
 }
 
 pub fn handle_dns(message: Vec<u8>, handler: Responder, challenges: &Arc<Challenges>) {
@@ -45,7 +44,7 @@ async fn handle_request(
     message: Vec<u8>,
     challenges: Arc<Challenges>,
     responder: Responder,
-) -> Result<(), SendError<()>> {
+) -> std::io::Result<()> {
     let (mut response, query_name, query_type, challenge_key) = match response_for_message(&message)
     {
         ReadMessageResult::Process {
