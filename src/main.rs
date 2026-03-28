@@ -12,7 +12,7 @@ use tokio::sync::mpsc::channel;
 use tracing::Level;
 
 use crate::challenges::{Challenge, Challenges};
-use crate::config::{Config, parse_config};
+use crate::config::{Config, ConfigError, parse_config, usage};
 use crate::dns::Responder;
 use crate::dns_handler::{bind_udp_stream, handle_dns};
 use crate::http_handler::handle_http;
@@ -21,10 +21,10 @@ fn main() {
     let config = match parse_config() {
         Ok(c) => c,
         Err(e) => {
-            let name = std::env::args()
-                .next()
-                .unwrap_or("acme-champion".to_string());
-            eprintln!("{e}\n\nUsage:\n\t{name} [-p HTTP_PORT] [-l LOG_LEVEL]\n");
+            match e {
+                ConfigError::JustPrintUsage => eprintln!("{}", usage()),
+                _ => eprintln!("{e}\n\n{}", usage()),
+            }
             std::process::exit(1);
         }
     };

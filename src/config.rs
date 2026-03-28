@@ -1,12 +1,30 @@
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
+use std::path::Path;
 use std::str::FromStr;
 use tracing::Level;
+
+pub fn usage() -> String {
+    let name = std::env::args()
+        .next()
+        .and_then(|p| Path::new(&p).file_name().map(|s| s.to_owned()))
+        .unwrap_or("acme-champion".into());
+    format!(
+        "Usage:\t{} [--http-port PORT] [--dns-addr ADDR] [-l LOG_LEVEL]
+
+\t--http-port specifies the port that the local API will listen on
+\t\t(the API always listens on 127.0.0.1)
+\t--dns-addr is in the form of '0.0.0.0:53' or '[::]:53'
+\t\t(can be set twice to linsten on both ipv4 and ipv6)
+\t-l or --log-level can be ERROR, WARN, INFO, DEBUG, TRACE
+\t-h or --help (you're readin' it)",
+        name.display(),
+    )
+}
 
 #[derive(Debug)]
 pub struct Config {
     pub http_port: u16,
-    // pub dns_port: u16,
     pub dns_addr_4: Option<SocketAddr>,
     pub dns_addr_6: Option<SocketAddr>,
     pub loglevel: Level,
@@ -18,6 +36,7 @@ pub enum ConfigError {
     InvalidSocket(String),
     MissingArgument(String),
     UnsupportedOption(String, String),
+    JustPrintUsage,
 }
 
 impl fmt::Display for ConfigError {
@@ -29,6 +48,7 @@ impl fmt::Display for ConfigError {
             ConfigError::UnsupportedOption(opt, flag) => {
                 write!(f, "{} is not supported for {}", opt, flag)
             }
+            ConfigError::JustPrintUsage => write!(f, ""),
         }
     }
 }
@@ -82,6 +102,9 @@ pub fn parse_config() -> Result<Config, ConfigError> {
                     })?,
                     None => return Err(ConfigError::MissingArgument(flag.to_string())),
                 };
+            }
+            "-h" | "--help" => {
+                return Err(ConfigError::JustPrintUsage);
             }
             _ => {}
         }
