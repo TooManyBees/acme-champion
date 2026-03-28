@@ -17,11 +17,15 @@ impl Challenges {
     }
 
     fn read(&self) -> RwLockReadGuard<'_, LinkedList<Challenge>> {
-        self.0.read().expect("lock can't be poisoned in a single-threaded program")
+        self.0
+            .read()
+            .expect("lock can't be poisoned in a single-threaded program")
     }
 
     fn write(&self) -> RwLockWriteGuard<'_, LinkedList<Challenge>> {
-        self.0.write().expect("lock can't be poisoned in a single-threaded program")
+        self.0
+            .write()
+            .expect("lock can't be poisoned in a single-threaded program")
     }
 
     pub fn all(&self) -> RwLockReadGuard<'_, LinkedList<Challenge>> {

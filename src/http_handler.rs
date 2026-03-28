@@ -1,7 +1,7 @@
 use super::{Challenge, Challenges};
 
 use std::convert::Infallible;
-use std::pin::Pin;
+use std::future::{self, Ready};
 use std::sync::Arc;
 
 use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
@@ -43,47 +43,45 @@ const REGISTER_PATH: &'static str = "/register/";
 impl Service<Request<Incoming>> for ChallengeRegister {
     type Response = HyperBodyResponse;
     type Error = hyper::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = Ready<Result<Self::Response, Self::Error>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         let challenges = self.challenges.clone();
-        Box::pin(async {
-            let path = req.uri().path().to_string();
-            let method = req.method().clone();
-            let status_code;
-            let resp = match (req.method(), req.uri().path()) {
-                (&Method::GET, "/") => handle_get_challenges(challenges),
-                (_, "/") => Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED)),
-                (&Method::POST, path) if path.starts_with(REGISTER_PATH) => {
-                    handle_set_challenge(req, challenges)
-                }
-                (&Method::DELETE, path) if path.starts_with(REGISTER_PATH) => {
-                    handle_unset_challenge(req, challenges)
-                }
-                (_, path) if path.starts_with(REGISTER_PATH) => {
-                    Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED))
-                }
-                _ => Ok(empty_response(StatusCode::NOT_FOUND)),
-            };
-            let resp = match resp {
-                Ok(resp) => {
-                    status_code = resp.status();
-                    Ok(resp)
-                }
-                Err(e) => {
-                    status_code = StatusCode::INTERNAL_SERVER_ERROR;
-                    tracing::error!(error = %e);
-                    Ok(empty_response(StatusCode::INTERNAL_SERVER_ERROR))
-                }
-            };
-            tracing::info!(
-                method = %method,
-                path = %path,
-                status_code = %status_code.as_u16(),
-                "served HTTP request",
-            );
-            resp
-        })
+        let path = req.uri().path().to_string();
+        let method = req.method().clone();
+        let status_code;
+        let resp = match (req.method(), req.uri().path()) {
+            (&Method::GET, "/") => handle_get_challenges(challenges),
+            (_, "/") => Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED)),
+            (&Method::POST, path) if path.starts_with(REGISTER_PATH) => {
+                handle_set_challenge(req, challenges)
+            }
+            (&Method::DELETE, path) if path.starts_with(REGISTER_PATH) => {
+                handle_unset_challenge(req, challenges)
+            }
+            (_, path) if path.starts_with(REGISTER_PATH) => {
+                Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED))
+            }
+            _ => Ok(empty_response(StatusCode::NOT_FOUND)),
+        };
+        let resp = match resp {
+            Ok(resp) => {
+                status_code = resp.status();
+                Ok(resp)
+            }
+            Err(e) => {
+                status_code = StatusCode::INTERNAL_SERVER_ERROR;
+                tracing::error!(error = %e);
+                Ok(empty_response(StatusCode::INTERNAL_SERVER_ERROR))
+            }
+        };
+        tracing::info!(
+            method = %method,
+            path = %path,
+            status_code = %status_code.as_u16(),
+            "served HTTP request",
+        );
+        future::ready(resp)
     }
 }
 
