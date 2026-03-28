@@ -8,6 +8,5 @@ http-body-util = "0.1.3"
 hyper = { version = "1.8", features = ["http1", "server"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
 tokio = { version = "1.50", features = ["net", "rt", "signal"] }
-tokio-stream = { version = "0.1.18", default-features = false, features = ["net"] }
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = "0.3.22"
