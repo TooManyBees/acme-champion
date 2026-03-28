@@ -52,13 +52,13 @@ impl Service<Request<Incoming>> for ChallengeRegister {
             let method = req.method().clone();
             let status_code;
             let resp = match (req.method(), req.uri().path()) {
-                (&Method::GET, "/") => handle_get_challenges(challenges).await,
+                (&Method::GET, "/") => handle_get_challenges(challenges),
                 (_, "/") => Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED)),
                 (&Method::POST, path) if path.starts_with(REGISTER_PATH) => {
-                    handle_set_challenge(req, challenges).await
+                    handle_set_challenge(req, challenges)
                 }
                 (&Method::DELETE, path) if path.starts_with(REGISTER_PATH) => {
-                    handle_unset_challenge(req, challenges).await
+                    handle_unset_challenge(req, challenges)
                 }
                 (_, path) if path.starts_with(REGISTER_PATH) => {
                     Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED))
@@ -87,9 +87,9 @@ impl Service<Request<Incoming>> for ChallengeRegister {
     }
 }
 
-async fn handle_get_challenges(challenges: Arc<Challenges>) -> HyperResponseResult {
+fn handle_get_challenges(challenges: Arc<Challenges>) -> HyperResponseResult {
     let mut result = String::new();
-    for challenge in challenges.all().await.iter() {
+    for challenge in challenges.all().iter() {
         result.push_str(&challenge.domain);
         result.push(' ');
         result.push_str(&challenge.name);
@@ -100,7 +100,7 @@ async fn handle_get_challenges(challenges: Arc<Challenges>) -> HyperResponseResu
     Ok(full_response(StatusCode::OK, result))
 }
 
-async fn handle_set_challenge(
+fn handle_set_challenge(
     req: Request<Incoming>,
     challenges: Arc<Challenges>,
 ) -> HyperResponseResult {
@@ -109,12 +109,12 @@ async fn handle_set_challenge(
         Err(_) => return Ok(empty_response(StatusCode::BAD_REQUEST)),
     };
 
-    challenges.set(challenge.clone()).await;
+    challenges.set(challenge.clone());
     tracing::info!(domain_name = %challenge.domain, challenge_name = %challenge.name, challenge_value = %challenge.value, "set challenge");
     Ok(empty_response(StatusCode::CREATED))
 }
 
-async fn handle_unset_challenge(
+fn handle_unset_challenge(
     req: Request<Incoming>,
     challenges: Arc<Challenges>,
 ) -> HyperResponseResult {
@@ -123,7 +123,7 @@ async fn handle_unset_challenge(
         Err(_) => return Ok(empty_response(StatusCode::BAD_REQUEST)),
     };
 
-    challenges.cleanup(&challenge).await;
+    challenges.cleanup(&challenge);
     Ok(empty_response(StatusCode::NO_CONTENT))
 }
 

@@ -58,7 +58,7 @@ async fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option
 
     match query_type {
         ValidQueryType::TXT => {
-            for value in challenges.named(&challenge_key).await {
+            for value in challenges.named(&challenge_key) {
                 tracing::debug!(
                     challenge_name = %challenge_key,
                     challenge_value = %value,
@@ -76,7 +76,7 @@ async fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option
             }
         }
         ValidQueryType::NS => {
-            if challenges.any(&challenge_key).await {
+            if challenges.any(&challenge_key) {
                 response.add_ns_answer(query_name.clone());
             }
         }
