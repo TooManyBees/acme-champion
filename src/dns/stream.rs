@@ -26,9 +26,7 @@ pub struct UdpStream {
 
 impl UdpStream {
     pub fn new(socket: Arc<UdpSocket>) -> UdpStream {
-        UdpStream {
-            socket,
-        }
+        UdpStream { socket }
     }
 
     pub async fn next(&mut self) -> std::io::Result<(Vec<u8>, Responder)> {
@@ -36,7 +34,10 @@ impl UdpStream {
         match self.socket.recv_from(&mut buf).await {
             Ok((len, addr)) => {
                 let data = buf[..len].to_vec();
-                let responder = Responder { addr, socket: self.socket.clone() };
+                let responder = Responder {
+                    addr,
+                    socket: self.socket.clone(),
+                };
                 Ok((data, responder))
             }
             Err(e) => {
