@@ -111,8 +111,12 @@ pub fn parse_config() -> Result<Config, ConfigError> {
     }
 
     if config.dns_addr_4.is_none() && config.dns_addr_6.is_none() {
-        let default_port = if cfg!(debug_assertions) { 5053 } else { 53 };
-        config.dns_addr_4 = Some(SocketAddr::new(IpAddr::from([0, 0, 0, 0]), default_port));
+        let addr = if cfg!(debug_assertions) {
+            SocketAddr::new(IpAddr::from([127, 0, 0, 1]), 5053)
+        } else {
+            SocketAddr::new(IpAddr::from([0, 0, 0, 0]), 53)
+        };
+        config.dns_addr_4 = Some(addr);
     }
 
     Ok(config)
