@@ -83,7 +83,13 @@ async fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option
     }
 
     tracing::trace!(?response);
-    tracing::info!(challenge_name = %challenge_key, rcode = ?response.rcode, "answered DNS query");
+    tracing::info!(
+        id = %response.transaction_id,
+        challenge_name = %challenge_key,
+        rcode = ?response.rcode,
+        type = ?query_type,
+        "answered DNS query",
+    );
 
     Some(response.to_bytes())
 }
