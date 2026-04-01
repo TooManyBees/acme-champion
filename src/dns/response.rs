@@ -53,6 +53,23 @@ impl Response {
         })
     }
 
+    pub fn add_soa_answer(&mut self, name: Vec<u8>) {
+
+        let mut value = Vec::with_capacity(name.len() * 2 + std::mem::size_of::<u32>() * 5);
+        value.extend(&name); // mname
+        value.extend(&name);// rname
+        value.extend(1u32.to_be_bytes()); // serial
+        value.extend(10800u32.to_be_bytes()); // refresh
+        value.extend(3600u32.to_be_bytes()); // retry
+        value.extend(604800u32.to_be_bytes()); // expire
+        value.extend(30u32.to_be_bytes()); // minimum
+        self.answers.push(Answer {
+            name: name.clone(),
+            query_type: ValidQueryType::SOA,
+            value,
+        });
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let answer_len: usize = self.answers.iter().map(|answer| answer.size_hint()).sum();
         let query_len = self

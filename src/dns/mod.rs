@@ -4,6 +4,7 @@ mod response;
 mod stream;
 
 const NS_TYPE: u16 = 2;
+const SOA_TYPE: u16 = 6;
 const TXT_TYPE: u16 = 16;
 const ACME_CHALLENGE_LABEL: &[u8] = b"_acme-challenge";
 
@@ -32,6 +33,7 @@ pub enum ReadMessageResult {
 #[repr(u16)]
 pub enum ValidQueryType {
     NS = 2,
+    SOA = 6,
     TXT = 16,
 }
 
@@ -91,6 +93,7 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
 
     let query_type = match query.query_type {
         TXT_TYPE => ValidQueryType::TXT,
+        SOA_TYPE => ValidQueryType::SOA,
         NS_TYPE => ValidQueryType::NS,
         query_type => {
             tracing::debug!(%query_type, "ignoring non-TXT/NS DNS query");

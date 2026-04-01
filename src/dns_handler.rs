@@ -62,6 +62,11 @@ async fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option
                 response.add_txt_answer(query_name.clone(), value);
             }
         }
+        ValidQueryType::SOA => {
+            if challenges.any(&challenge_key).await {
+                response.add_soa_answer(query_name.clone());
+            }
+        }
         ValidQueryType::NS => {
             if challenges.any(&challenge_key).await {
                 response.add_ns_answer(query_name.clone());
@@ -77,7 +82,7 @@ async fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option
         response.set_rcode_noerror();
     }
 
-    tracing::debug!(?response);
+    tracing::trace!(?response);
     tracing::info!(challenge_name = %challenge_key, rcode = ?response.rcode, "answered DNS query");
 
     Some(response.to_bytes())
