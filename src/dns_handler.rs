@@ -59,7 +59,15 @@ async fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option
     match query_type {
         ValidQueryType::TXT => {
             for value in challenges.named(&challenge_key).await {
+                tracing::debug!(
+                    challenge_name = %challenge_key,
+                    challenge_value = %value,
+                    "found registered DNS challenge",
+                );
                 response.add_txt_answer(query_name.clone(), value);
+            }
+            if response.answers.is_empty() {
+                tracing::debug!(challenge_name = %challenge_key, "DNS challenge not found");
             }
         }
         ValidQueryType::SOA => {
@@ -75,10 +83,8 @@ async fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option
     }
 
     if response.answers.is_empty() {
-        tracing::debug!(challenge_name = %challenge_key, "DNS challenge not found");
         response.set_rcode_nxdomain();
     } else {
-        tracing::debug!(challenge_name = %challenge_key, "found registered DNS challenge");
         response.set_rcode_noerror();
     }
 
