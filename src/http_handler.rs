@@ -18,26 +18,15 @@ pub fn bind_tcp_listener(port: u16) -> std::io::Result<TcpListener> {
 
 #[derive(Debug)]
 pub enum HttpError {
-    Io(std::io::Error),
+    Receive(std::io::Error),
     Parse(httparse::Error),
-}
-
-impl From<std::io::Error> for HttpError {
-    fn from(err: std::io::Error) -> HttpError {
-        HttpError::Io(err)
-    }
-}
-
-impl From<httparse::Error> for HttpError {
-    fn from(err: httparse::Error) -> HttpError {
-        HttpError::Parse(err)
-    }
+    Respond(std::io::Error),
 }
 
 impl fmt::Display for HttpError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            HttpError::Io(e) => e.fmt(fmt),
+            HttpError::Receive(e) | HttpError::Respond(e) => e.fmt(fmt),
             HttpError::Parse(e) => e.fmt(fmt),
         }
     }
@@ -50,13 +39,13 @@ pub fn handle_http(
     buf: &mut [u8],
     challenges: &mut Challenges,
 ) -> Result<(), HttpError> {
-    let len = stream.read(buf)?;
+    let len = stream.read(buf).map_err(HttpError::Receive)?;
     let mut http_headers = [httparse::EMPTY_HEADER; 8];
     let mut req = httparse::Request::new(&mut http_headers);
-    let _body_offset = match req.parse(&buf[..len])? {
+    let _body_offset = match req.parse(&buf[..len]).map_err(HttpError::Parse)? {
         Status::Complete(offset) => offset,
         Status::Partial => {
-            empty_http_response(stream, 400, "bad request")?;
+            empty_http_response(stream, 400, "bad request").map_err(HttpError::Respond)?;
             return Ok(());
         }
     };
@@ -75,35 +64,37 @@ pub fn handle_http(
         _ => empty_http_response(stream, 404, "not found"),
     };
 
-    tracing::info!(
-        method = %req.method.unwrap_or("unknown"),
-        path = %req.path.unwrap_or("unknown"),
-        "served http request",
-    );
-
-    if let Err(error) = result {
-        tracing::error!(%error);
+    match result {
+        Ok(status_code) => {
+            tracing::info!(
+                method = %req.method.unwrap_or("unknown"),
+                path = %req.path.unwrap_or("unknown"),
+                %status_code,
+                "served http request",
+            );
+            Ok(())
+        },
+        Err(e) => Err(HttpError::Respond(e)),
     }
-
-    Ok(())
 }
 
 fn empty_http_response(
     mut stream: TcpStream,
     status_code: u16,
     reason: &str,
-) -> std::io::Result<()> {
+) -> std::io::Result<u16> {
     stream.write_fmt(format_args!(
         "HTTP/1.1 {status_code} {reason}\r\nConnection: close\r\n\r\n"
     ))?;
-    stream.flush()
+    stream.flush()?;
+    Ok(status_code)
 }
 
 fn handle_set_challenge(
     stream: TcpStream,
     req: &Request,
     challenges: &mut Challenges,
-) -> std::io::Result<()> {
+) -> std::io::Result<u16> {
     let challenge = match challenge_from_req(req) {
         Ok(c) => c,
         Err(_) => return empty_http_response(stream, 400, "bad request"),
@@ -118,7 +109,7 @@ fn handle_unset_challenge(
     stream: TcpStream,
     req: &Request,
     challenges: &mut Challenges,
-) -> std::io::Result<()> {
+) -> std::io::Result<u16> {
     let challenge = match challenge_from_req(req) {
         Ok(c) => c,
         Err(_) => return empty_http_response(stream, 400, "bad request"),
