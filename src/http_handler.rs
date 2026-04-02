@@ -203,8 +203,9 @@ pub enum HttpError {
 impl fmt::Display for HttpError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            HttpError::Receive(e) | HttpError::Respond(e) => e.fmt(fmt),
-            HttpError::Parse(e) => e.fmt(fmt),
+            HttpError::Receive(e) => write!(fmt, "Error receiving HTTP request: {}", e),
+            HttpError::Parse(e) => write!(fmt, "Error parsing HTTP request: {}", e),
+            HttpError::Respond(e) => write!(fmt, "Error responding to HTTP request: {}", e),
         }
     }
 }
