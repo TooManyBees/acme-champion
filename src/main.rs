@@ -4,7 +4,7 @@ mod dns;
 mod dns_handler;
 mod http_handler;
 
-use crate::challenges::{Challenge, Challenges};
+use crate::challenges::Challenges;
 use crate::config::{Config, ConfigError, parse_config, usage};
 use crate::dns_handler::{bind_udp_socket, handle_dns};
 use crate::http_handler::{bind_tcp_listener, handle_http};
@@ -52,7 +52,7 @@ fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sy
     loop {
         if let Some(stream) = accept(&http_listener) {
             if let Err(error) = handle_http(stream, &mut buf, &mut challenges) {
-                tracing::error!(?error);
+                tracing::error!(%error, "Error handling HTTP request");
             }
         }
 

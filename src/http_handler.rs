@@ -1,5 +1,6 @@
 use crate::challenges::{Challenge, Challenges};
 use httparse::{Request, Status};
+use std::fmt;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 
@@ -30,6 +31,15 @@ impl From<std::io::Error> for HttpError {
 impl From<httparse::Error> for HttpError {
     fn from(err: httparse::Error) -> HttpError {
         HttpError::Parse(err)
+    }
+}
+
+impl fmt::Display for HttpError {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            HttpError::Io(e) => e.fmt(fmt),
+            HttpError::Parse(e) => e.fmt(fmt),
+        }
     }
 }
 
