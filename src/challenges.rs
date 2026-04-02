@@ -1,5 +1,4 @@
 use std::collections::LinkedList;
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Challenge {
@@ -9,31 +8,19 @@ pub struct Challenge {
 }
 
 #[derive(Debug)]
-pub struct Challenges(RwLock<LinkedList<Challenge>>);
+pub struct Challenges(LinkedList<Challenge>);
 
 impl Challenges {
     pub fn new() -> Challenges {
-        Challenges(RwLock::new(LinkedList::new()))
+        Challenges(LinkedList::new())
     }
 
-    fn read(&self) -> RwLockReadGuard<'_, LinkedList<Challenge>> {
-        self.0
-            .read()
-            .expect("lock can't be poisoned in a single-threaded program")
-    }
-
-    fn write(&self) -> RwLockWriteGuard<'_, LinkedList<Challenge>> {
-        self.0
-            .write()
-            .expect("lock can't be poisoned in a single-threaded program")
-    }
-
-    pub fn all(&self) -> RwLockReadGuard<'_, LinkedList<Challenge>> {
-        self.read()
+    pub fn all(&self) -> &LinkedList<Challenge> {
+        &self.0
     }
 
     pub fn any(&self, name: &str) -> bool {
-        for c in self.read().iter() {
+        for c in &self.0 {
             if c.name == name {
                 return true;
             }
@@ -43,7 +30,7 @@ impl Challenges {
 
     pub fn named(&self, name: &str) -> Vec<String> {
         let mut matching = Vec::with_capacity(1);
-        for c in self.read().iter() {
+        for c in &self.0 {
             if c.name == name {
                 matching.push(c.value.clone())
             }
@@ -51,13 +38,11 @@ impl Challenges {
         matching
     }
 
-    pub fn set(&self, challenge: Challenge) {
-        let mut cs = self.write();
-        cs.push_back(challenge);
+    pub fn set(&mut self, challenge: Challenge) {
+        self.0.push_back(challenge);
     }
 
-    pub fn cleanup(&self, challenge: &Challenge) {
-        let mut cs = self.write();
-        cs.extract_if(|c| c == challenge).for_each(drop);
+    pub fn cleanup(&mut self, challenge: &Challenge) {
+        self.0.extract_if(|c| c == challenge).for_each(drop);
     }
 }

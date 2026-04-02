@@ -1,91 +1,109 @@
 use super::{Challenge, Challenges};
 
-use std::convert::Infallible;
-use std::future::{self, Ready};
-use std::sync::Arc;
+use httparse::{Request, Status};
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 
-use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
-use hyper::{
-    Method, Request, Response, StatusCode,
-    body::{Bytes, Incoming},
-    server::conn::http1,
-    service::Service,
-};
-use hyper_util::rt::TokioIo;
-use tokio::net::TcpStream;
-
-type HyperBodyResponse = Response<BoxBody<Bytes, Infallible>>;
-type HyperResponseResult = Result<HyperBodyResponse, hyper::Error>;
-
-pub fn handle_http(stream: TcpStream, challenges: &Arc<Challenges>) {
-    let service = ChallengeRegister::new(challenges.clone());
-    let io = TokioIo::new(stream);
-    tokio::task::spawn(async move {
-        if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-            tracing::error!(error = %err, "error serving TCP connection");
-        }
-    });
+pub fn bind_tcp_listener(port: u16) -> std::io::Result<TcpListener> {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let http_listener = TcpListener::bind(addr)
+        .and_then(|listener| listener.set_nonblocking(true).map(|_| listener))
+        .map_err(|error| {
+            tracing::error!(%addr, %error, "Failed to bind TCP listener");
+            error
+        })?;
+    tracing::debug!(%addr, "Listening for TCP traffic");
+    Ok(http_listener)
 }
 
-#[derive(Clone, Debug)]
-struct ChallengeRegister {
-    challenges: Arc<Challenges>,
+#[derive(Debug)]
+pub enum HttpError {
+    Io(std::io::Error),
+    Parse(httparse::Error),
 }
 
-impl ChallengeRegister {
-    fn new(challenges: Arc<Challenges>) -> Self {
-        ChallengeRegister { challenges }
+impl From<std::io::Error> for HttpError {
+    fn from(err: std::io::Error) -> HttpError {
+        HttpError::Io(err)
+    }
+}
+
+impl From<httparse::Error> for HttpError {
+    fn from(err: httparse::Error) -> HttpError {
+        HttpError::Parse(err)
     }
 }
 
 const REGISTER_PATH: &'static str = "/register/";
 
-impl Service<Request<Incoming>> for ChallengeRegister {
-    type Response = HyperBodyResponse;
-    type Error = hyper::Error;
-    type Future = Ready<Result<Self::Response, Self::Error>>;
+pub fn handle_http(
+    mut stream: TcpStream,
+    buf: &mut [u8],
+    challenges: &mut Challenges,
+) -> Result<(), HttpError> {
+    let len = stream.read(buf)?;
+    let mut http_headers = [httparse::EMPTY_HEADER; 8];
+    let mut req = httparse::Request::new(&mut http_headers);
+    let _body_offset = match req.parse(&buf[..len])? {
+        Status::Complete(offset) => offset,
+        Status::Partial => {
+            empty_http_response(stream, 400, "bad request")?;
+            return Ok(());
+        }
+    };
 
-    fn call(&self, req: Request<Incoming>) -> Self::Future {
-        let challenges = self.challenges.clone();
-        let path = req.uri().path().to_string();
-        let method = req.method().clone();
-        let status_code;
-        let resp = match (req.method(), req.uri().path()) {
-            (&Method::GET, "/") => handle_get_challenges(challenges),
-            (_, "/") => Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED)),
-            (&Method::POST, path) if path.starts_with(REGISTER_PATH) => {
-                handle_set_challenge(req, challenges)
-            }
-            (&Method::DELETE, path) if path.starts_with(REGISTER_PATH) => {
-                handle_unset_challenge(req, challenges)
-            }
-            (_, path) if path.starts_with(REGISTER_PATH) => {
-                Ok(empty_response(StatusCode::METHOD_NOT_ALLOWED))
-            }
-            _ => Ok(empty_response(StatusCode::NOT_FOUND)),
-        };
-        let resp = match resp {
-            Ok(resp) => {
-                status_code = resp.status();
-                Ok(resp)
-            }
-            Err(e) => {
-                status_code = StatusCode::INTERNAL_SERVER_ERROR;
-                tracing::error!(error = %e);
-                Ok(empty_response(StatusCode::INTERNAL_SERVER_ERROR))
-            }
-        };
-        tracing::info!(
-            method = %method,
-            path = %path,
-            status_code = %status_code.as_u16(),
-            "served HTTP request",
-        );
-        future::ready(resp)
+    let result = match (req.method, req.path) {
+        (None, _) | (_, None) => empty_http_response(stream, 400, "bad request"),
+        (Some("GET"), Some("/")) => handle_get_challenges(stream, challenges),
+        (Some("POST"), Some(path)) if path.starts_with(REGISTER_PATH) => {
+            handle_set_challenge(stream, &req, challenges)
+        }
+        (Some("DELETE"), Some(path)) if path.starts_with(REGISTER_PATH) => {
+            handle_unset_challenge(stream, &req, challenges)
+        }
+        (Some(_), Some(path)) if path.starts_with(REGISTER_PATH) => {
+            empty_http_response(stream, 405, "method not allowed")
+        }
+        _ => empty_http_response(stream, 404, "not found"),
+    };
+
+    tracing::info!(
+        method = %req.method.unwrap_or("unknown"),
+        path = %req.path.unwrap_or("unknown"),
+        "served http request",
+    );
+
+    if let Err(error) = result {
+        tracing::error!(%error);
     }
+
+    Ok(())
 }
 
-fn handle_get_challenges(challenges: Arc<Challenges>) -> HyperResponseResult {
+fn empty_http_response(
+    mut stream: TcpStream,
+    status_code: u16,
+    reason: &str,
+) -> std::io::Result<()> {
+    stream.write_fmt(format_args!(
+        "HTTP/1.1 {status_code} {reason}\r\nConnection: close\r\n\r\n"
+    ))?;
+    stream.flush()
+}
+
+fn full_http_response(
+    mut stream: TcpStream,
+    status_code: u16,
+    reason: &str,
+    body: &str,
+) -> std::io::Result<()> {
+    stream.write_fmt(format_args!(
+        "HTTP/1.1 {status_code} {reason}\r\nConnection: close\r\n\r\n{body}\r\n\r\n"
+    ))?;
+    stream.flush()
+}
+
+fn handle_get_challenges(stream: TcpStream, challenges: &Challenges) -> std::io::Result<()> {
     let mut result = String::new();
     for challenge in challenges.all().iter() {
         result.push_str(&challenge.domain);
@@ -95,63 +113,77 @@ fn handle_get_challenges(challenges: Arc<Challenges>) -> HyperResponseResult {
         result.push_str(&format!("{:?}", challenge.value));
         result.push('\n');
     }
-    Ok(full_response(StatusCode::OK, result))
+
+    full_http_response(stream, 200, "OK", &result)
 }
 
 fn handle_set_challenge(
-    req: Request<Incoming>,
-    challenges: Arc<Challenges>,
-) -> HyperResponseResult {
-    let challenge = match challenge_from_req(&req) {
+    stream: TcpStream,
+    req: &Request,
+    challenges: &mut Challenges,
+) -> std::io::Result<()> {
+    let challenge = match challenge_from_req(req) {
         Ok(c) => c,
-        Err(_) => return Ok(empty_response(StatusCode::BAD_REQUEST)),
+        Err(_) => return empty_http_response(stream, 400, "bad request"),
     };
 
     challenges.set(challenge.clone());
     tracing::info!(domain_name = %challenge.domain, challenge_name = %challenge.name, challenge_value = %challenge.value, "set challenge");
-    Ok(empty_response(StatusCode::CREATED))
+    empty_http_response(stream, 201, "created")
 }
 
 fn handle_unset_challenge(
-    req: Request<Incoming>,
-    challenges: Arc<Challenges>,
-) -> HyperResponseResult {
-    let challenge = match challenge_from_req(&req) {
+    stream: TcpStream,
+    req: &Request,
+    challenges: &mut Challenges,
+) -> std::io::Result<()> {
+    let challenge = match challenge_from_req(req) {
         Ok(c) => c,
-        Err(_) => return Ok(empty_response(StatusCode::BAD_REQUEST)),
+        Err(_) => return empty_http_response(stream, 400, "bad request"),
     };
 
     challenges.cleanup(&challenge);
-    Ok(empty_response(StatusCode::NO_CONTENT))
+    empty_http_response(stream, 204, "no content")
 }
 
-fn challenge_from_req(req: &Request<Incoming>) -> Result<Challenge, ()> {
-    let domain = req.uri().path()[REGISTER_PATH.len()..]
+fn challenge_from_req(req: &Request) -> Result<Challenge, ()> {
+    let domain = req
+        .path
+        .map(|p| &p[REGISTER_PATH.len()..])
+        .ok_or(())?
         .trim_end_matches('.')
         .to_string();
-    let name_header = match req.headers().get("X-ACME-Challenge-Name") {
-        Some(value) => value,
+    let name_header = match req
+        .headers
+        .iter()
+        .find(|h| h.name == "X-ACME-Challenge-Name")
+    {
+        Some(header) => header.value,
         None => {
             tracing::warn!(domain_name = %domain, "ignoring HTTP request without X-ACME-Challenge-Name header");
             return Err(());
         }
     };
-    let name = match name_header.to_str() {
+    let name = match String::from_utf8(name_header.to_vec()) {
         Ok(s) => s.trim_end_matches('.').to_string(),
         Err(_) => {
             tracing::warn!(domain_name = %domain, "ignoring HTTP request without non-visible ASCII challenge name");
             return Err(());
         }
     };
-    let value_header = match req.headers().get("X-ACME-Challenge-Value") {
-        Some(value) => value,
+    let value_header = match req
+        .headers
+        .iter()
+        .find(|h| h.name == "X-ACME-Challenge-Value")
+    {
+        Some(header) => header.value,
         None => {
             tracing::warn!(domain_name = %domain, challenge_name = %name, "ignoring HTTP request without X-ACME-Challenge-Value header");
             return Err(());
         }
     };
-    let value = match value_header.to_str() {
-        Ok(s) => s.to_string(),
+    let value = match String::from_utf8(value_header.to_vec()) {
+        Ok(s) => s,
         Err(_) => {
             tracing::warn!(domain_name = %domain, challenge_name = %name, "ignoring HTTP request without non-visible ASCII challenge value");
             return Err(());
@@ -163,16 +195,4 @@ fn challenge_from_req(req: &Request<Incoming>) -> Result<Challenge, ()> {
         name,
         value,
     })
-}
-
-fn empty_response(status_code: StatusCode) -> HyperBodyResponse {
-    let mut resp = Response::new(Empty::new().boxed());
-    *resp.status_mut() = status_code;
-    resp
-}
-
-fn full_response<T: Into<Bytes>>(status_code: StatusCode, chunk: T) -> HyperBodyResponse {
-    let mut resp = Response::new(Full::new(chunk.into()).boxed());
-    *resp.status_mut() = status_code;
-    resp
 }

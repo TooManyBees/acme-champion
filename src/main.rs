@@ -4,18 +4,15 @@ mod dns;
 mod dns_handler;
 mod http_handler;
 
-use std::io::{self, ErrorKind};
-use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::channel;
+use std::io::ErrorKind;
+use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::time::Duration;
 use tracing::Level;
 
 use crate::challenges::{Challenge, Challenges};
 use crate::config::{Config, ConfigError, parse_config, usage};
-use crate::dns::Responder;
-use crate::dns_handler::{bind_udp_stream, handle_dns};
-use crate::http_handler::handle_http;
+use crate::dns_handler::{bind_udp_socket, handle_dns};
+use crate::http_handler::{bind_tcp_listener, handle_http};
 
 fn main() {
     let config = match parse_config() {
@@ -35,108 +32,69 @@ fn main() {
 
     init_tracing(config.loglevel);
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .build()
-        .unwrap();
-
-    if let Err(e) = rt.block_on(main_loop(config)) {
-        tracing::error!(error = %e);
+    if let Err(error) = main_loop(config) {
+        tracing::error!(%error);
     }
 
     tracing::info!("Shutting down");
 }
 
-async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let http_addr = SocketAddr::from(([127, 0, 0, 1], config.http_port));
-    let http_listener = TcpListener::bind(http_addr).await.map_err(|e| {
-        tracing::error!(addr = %http_addr, error = %e, "Failed to bind TCP listener");
-        e
-    })?;
+const SLEEP: Duration = Duration::from_millis(100);
 
-    let challenges = Arc::new(Challenges::new());
+fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let http_listener = bind_tcp_listener(config.http_port)?;
+    let dns_socket_4 = bind_udp_socket(config.dns_addr_4)?;
+    let dns_socket_6 = bind_udp_socket(config.dns_addr_6)?;
+    tracing::info!("Listening");
 
-    let (tx, mut rx) = channel(20);
+    let mut challenges = Challenges::new();
 
+    let mut tcp_buf = [0u8; 512];
+    let mut udp_buf = [0u8; 512];
+    loop {
+        if let Some(stream) = accept(&http_listener) {
+            if let Err(error) = handle_http(stream, &mut tcp_buf, &mut challenges) {
+                tracing::error!(?error);
+            }
+        }
+
+        if let Some(socket) = &dns_socket_4 {
+            if let Some((buf, addr)) = recv(&socket, &mut udp_buf) {
+                handle_dns(buf, &socket, addr, &challenges);
+            }
+        }
+
+        if let Some(socket) = &dns_socket_6 {
+            if let Some((buf, addr)) = recv(&socket, &mut udp_buf) {
+                handle_dns(buf, &socket, addr, &challenges);
+            }
+        }
+
+        std::thread::sleep(SLEEP);
+    }
+}
+
+fn accept(listener: &TcpListener) -> Option<TcpStream> {
+    match listener
+        .accept()
+        .and_then(|(stream, _addr)| stream.set_nonblocking(false).map(|_| stream))
     {
-        let tx = tx.clone();
-        tokio::task::spawn(async move {
-            loop {
-                let event = handle_tcp_connection(http_listener.accept().await);
-                let _ = tx.send(event).await;
-            }
-        });
-        tracing::debug!(addr = %http_addr, "Listening for TCP traffic");
-    }
-
-    if let Some(addr) = config.dns_addr_4 {
-        let mut udp_stream = bind_udp_stream(addr).await?;
-        let tx = tx.clone();
-        tokio::task::spawn(async move {
-            loop {
-                let event = handle_udp_connection(udp_stream.next().await);
-                let _ = tx.send(event).await;
-            }
-        });
-        tracing::debug!(%addr, "Listening for UDP traffic");
-    }
-
-    if let Some(addr) = config.dns_addr_6 {
-        let mut udp_stream = bind_udp_stream(addr).await?;
-        let tx = tx.clone();
-        tokio::task::spawn(async move {
-            loop {
-                let event = handle_udp_connection(udp_stream.next().await);
-                let _ = tx.send(event).await;
-            }
-        });
-        tracing::debug!(%addr, "Listening for UDP traffic");
-    }
-
-    tracing::info!("Started");
-
-    while let Some(event) = rx.recv().await {
-        match event {
-            LoopEvent::NewHttpConn(stream) => handle_http(stream, &challenges),
-            LoopEvent::NewUdpConn(msg, responder) => handle_dns(msg, responder, &challenges),
-            LoopEvent::NoOp => {}
-            LoopEvent::Shutdown => break,
+        Ok(stream) => Some(stream),
+        Err(ref e) if e.kind() == ErrorKind::WouldBlock => None,
+        Err(error) => {
+            tracing::error!(%error, "Error receiving TCP connection");
+            None
         }
     }
-
-    Ok(())
 }
 
-enum LoopEvent {
-    NewHttpConn(TcpStream),
-    NewUdpConn(Vec<u8>, Responder),
-    NoOp,
-    Shutdown,
-}
-
-fn handle_tcp_connection(result: io::Result<(TcpStream, SocketAddr)>) -> LoopEvent {
-    match result {
-        Ok((stream, _)) => LoopEvent::NewHttpConn(stream),
-        Err(e) => handle_io_error(e),
-    }
-}
-
-fn handle_udp_connection(result: io::Result<(Vec<u8>, Responder)>) -> LoopEvent {
-    match result {
-        Ok((message, responder)) => LoopEvent::NewUdpConn(message, responder),
-        Err(e) => handle_io_error(e),
-    }
-}
-
-fn handle_io_error(error: io::Error) -> LoopEvent {
-    match error.kind() {
-        ErrorKind::NotConnected | ErrorKind::ConnectionAborted => {
-            tracing::error!(%error);
-            LoopEvent::Shutdown
-        }
-        _ => {
-            tracing::warn!(%error);
-            LoopEvent::NoOp
+fn recv<'buf>(socket: &UdpSocket, buf: &'buf mut [u8]) -> Option<(&'buf [u8], SocketAddr)> {
+    match socket.recv_from(buf) {
+        Ok((n, addr)) => Some((&buf[..n], addr)),
+        Err(ref e) if e.kind() == ErrorKind::WouldBlock => None,
+        Err(error) => {
+            tracing::error!(%error, "Error receiving UDP message");
+            None
         }
     }
 }
@@ -144,9 +102,7 @@ fn handle_io_error(error: io::Error) -> LoopEvent {
 fn init_tracing(level: Level) {
     use tracing_subscriber::{filter::Targets, prelude::*};
 
-    let targets = Targets::new()
-        .with_target("hyper", Level::INFO)
-        .with_default(level);
+    let targets = Targets::new().with_default(level);
     let reg = tracing_subscriber::registry();
     #[cfg(debug_assertions)]
     let layer = tracing_subscriber::fmt::layer().pretty();

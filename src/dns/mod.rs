@@ -1,7 +1,6 @@
 mod header;
 mod query;
 mod response;
-mod stream;
 
 const NS_TYPE: u16 = 2;
 const SOA_TYPE: u16 = 6;
@@ -11,7 +10,6 @@ const ACME_CHALLENGE_LABEL: &[u8] = b"_acme-challenge";
 use header::{MessageType, OpCode, QueryHeader, QueryHeaderError};
 use query::{Query, QueryError};
 use response::{Response, ResponseCode};
-pub use stream::{Responder, UdpStream};
 
 fn u16_at(bytes: &[u8], pos: usize) -> u16 {
     u16::from_be_bytes([bytes[pos], bytes[pos + 1]])

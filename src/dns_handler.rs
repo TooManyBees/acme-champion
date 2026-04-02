@@ -1,48 +1,43 @@
-use crate::dns::{ReadMessageResult, Responder, UdpStream, ValidQueryType, response_for_message};
+use crate::dns::{ReadMessageResult, ValidQueryType, response_for_message};
 
 use super::Challenges;
 
-use std::{
-    net::{IpAddr, SocketAddr},
-    sync::Arc,
-};
-use tokio::net::UdpSocket;
-use tracing::Instrument;
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 
-pub async fn bind_udp_stream(addr: SocketAddr) -> std::io::Result<UdpStream> {
-    let dns_socket_4 = UdpSocket::bind(addr).await.map_err(|e| {
-        tracing::error!(%addr, error = %e, "Failed to bind UDP listener");
-        e
-    })?;
-    Ok(UdpStream::new(Arc::new(dns_socket_4)))
+pub fn bind_udp_socket(addr: Option<SocketAddr>) -> std::io::Result<Option<UdpSocket>> {
+    addr.map(|addr| {
+        let socket =
+            UdpSocket::bind(addr).and_then(|socket| socket.set_nonblocking(true).map(|_| socket));
+        tracing::debug!(%addr, "Listening for UDP traffic");
+        socket
+    })
+    .transpose()
 }
 
-pub fn handle_dns(message: Vec<u8>, responder: Responder, challenges: &Arc<Challenges>) {
-    let src_addr = responder.addr();
+pub fn handle_dns(
+    message: &[u8],
+    socket: &UdpSocket,
+    src_addr: SocketAddr,
+    challenges: &Challenges,
+) {
     tracing::debug!(remote_addr = %src_addr, "new UDP message");
     if !valid_return_address(&src_addr) {
         tracing::warn!(addr = %src_addr, "ignoring DNS request with invalid return address");
         return;
     }
 
-    let challenges = challenges.clone();
-    tokio::task::spawn(
-        async move {
-            if let Some(response) = handle_request(message, challenges) {
-                match responder.send(response).await {
-                    Err(e) => {
-                        tracing::error!(error = %e, "error handling DNS request");
-                    }
-                    _ => {}
-                }
+    if let Some(response) = handle_request(message, challenges) {
+        match socket.send_to(&response, src_addr) {
+            Err(e) => {
+                tracing::error!(error = %e, "error handling DNS request");
             }
+            _ => {}
         }
-        .instrument(tracing::info_span!("process DNS query", remote_addr = %src_addr)),
-    );
+    }
 }
 
-fn handle_request(message: Vec<u8>, challenges: Arc<Challenges>) -> Option<Vec<u8>> {
-    let (mut response, query_name, query_type, challenge_key) = match response_for_message(&message)
+fn handle_request(message: &[u8], challenges: &Challenges) -> Option<Vec<u8>> {
+    let (mut response, query_name, query_type, challenge_key) = match response_for_message(message)
     {
         ReadMessageResult::Process {
             response,
