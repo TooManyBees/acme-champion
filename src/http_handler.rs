@@ -57,7 +57,7 @@ pub fn handle_http(
                 "served http request",
             );
             Ok(())
-        },
+        }
         Err(e) => Err(HttpError::Respond(e)),
     }
 }
@@ -67,7 +67,9 @@ fn empty_http_response(
     status_code: StatusCode,
 ) -> std::io::Result<StatusCode> {
     stream.write_fmt(format_args!(
-        "HTTP/1.1 {} {}\r\nConnection: close\r\n\r\n", status_code.as_str(), status_code.reason(),
+        "HTTP/1.1 {} {}\r\nConnection: close\r\n\r\n",
+        status_code.as_str(),
+        status_code.reason(),
     ))?;
     stream.flush()?;
     Ok(status_code)
