@@ -32,6 +32,46 @@ impl fmt::Display for HttpError {
     }
 }
 
+#[allow(non_camel_case_types)]
+#[derive(Clone, Copy, Debug)]
+enum StatusCode {
+    CREATED,
+    NO_CONTENT,
+    BAD_REQUEST,
+    NOT_FOUND,
+    METHOD_NOT_ALLOWED,
+}
+
+impl StatusCode {
+    fn as_str(self) -> &'static str {
+        use StatusCode::*;
+        match self {
+            CREATED => "201",
+            NO_CONTENT => "204",
+            BAD_REQUEST => "400",
+            NOT_FOUND => "404",
+            METHOD_NOT_ALLOWED => "405",
+        }
+    }
+
+    fn reason(self) -> &'static str {
+        use StatusCode::*;
+        match self {
+            CREATED => "Created",
+            NO_CONTENT => "No Content",
+            BAD_REQUEST => "Bad Request",
+            NOT_FOUND => "Not Found",
+            METHOD_NOT_ALLOWED => "Method Not Allowed",
+        }
+    }
+}
+
+impl fmt::Display for StatusCode {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "{} {}", self.as_str(), self.reason())
+    }
+}
+
 const REGISTER_PATH: &'static str = "/register/";
 
 pub fn handle_http(
@@ -45,13 +85,13 @@ pub fn handle_http(
     let _body_offset = match req.parse(&buf[..len]).map_err(HttpError::Parse)? {
         Status::Complete(offset) => offset,
         Status::Partial => {
-            empty_http_response(stream, 400, "bad request").map_err(HttpError::Respond)?;
+            empty_http_response(stream, StatusCode::BAD_REQUEST).map_err(HttpError::Respond)?;
             return Ok(());
         }
     };
 
     let result = match (req.method, req.path) {
-        (None, _) | (_, None) => empty_http_response(stream, 400, "bad request"),
+        (None, _) | (_, None) => empty_http_response(stream, StatusCode::BAD_REQUEST),
         (Some("POST"), Some(path)) if path.starts_with(REGISTER_PATH) => {
             handle_set_challenge(stream, &req, challenges)
         }
@@ -59,9 +99,9 @@ pub fn handle_http(
             handle_unset_challenge(stream, &req, challenges)
         }
         (Some(_), Some(path)) if path.starts_with(REGISTER_PATH) => {
-            empty_http_response(stream, 405, "method not allowed")
+            empty_http_response(stream, StatusCode::METHOD_NOT_ALLOWED)
         }
-        _ => empty_http_response(stream, 404, "not found"),
+        _ => empty_http_response(stream, StatusCode::NOT_FOUND),
     };
 
     match result {
@@ -80,11 +120,10 @@ pub fn handle_http(
 
 fn empty_http_response(
     mut stream: TcpStream,
-    status_code: u16,
-    reason: &str,
-) -> std::io::Result<u16> {
+    status_code: StatusCode,
+) -> std::io::Result<StatusCode> {
     stream.write_fmt(format_args!(
-        "HTTP/1.1 {status_code} {reason}\r\nConnection: close\r\n\r\n"
+        "HTTP/1.1 {} {}\r\nConnection: close\r\n\r\n", status_code.as_str(), status_code.reason(),
     ))?;
     stream.flush()?;
     Ok(status_code)
@@ -94,29 +133,29 @@ fn handle_set_challenge(
     stream: TcpStream,
     req: &Request,
     challenges: &mut Challenges,
-) -> std::io::Result<u16> {
+) -> std::io::Result<StatusCode> {
     let challenge = match challenge_from_req(req) {
         Ok(c) => c,
-        Err(_) => return empty_http_response(stream, 400, "bad request"),
+        Err(_) => return empty_http_response(stream, StatusCode::BAD_REQUEST),
     };
 
     challenges.set(challenge.clone());
     tracing::info!(domain_name = %challenge.domain, challenge_name = %challenge.name, challenge_value = %challenge.value, "set challenge");
-    empty_http_response(stream, 201, "created")
+    empty_http_response(stream, StatusCode::CREATED)
 }
 
 fn handle_unset_challenge(
     stream: TcpStream,
     req: &Request,
     challenges: &mut Challenges,
-) -> std::io::Result<u16> {
+) -> std::io::Result<StatusCode> {
     let challenge = match challenge_from_req(req) {
         Ok(c) => c,
-        Err(_) => return empty_http_response(stream, 400, "bad request"),
+        Err(_) => return empty_http_response(stream, StatusCode::BAD_REQUEST),
     };
 
     challenges.cleanup(&challenge);
-    empty_http_response(stream, 204, "no content")
+    empty_http_response(stream, StatusCode::NO_CONTENT)
 }
 
 fn challenge_from_req(req: &Request) -> Result<Challenge, ()> {
