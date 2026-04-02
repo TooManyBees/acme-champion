@@ -16,62 +16,6 @@ pub fn bind_tcp_listener(port: u16) -> std::io::Result<TcpListener> {
     Ok(http_listener)
 }
 
-#[derive(Debug)]
-pub enum HttpError {
-    Receive(std::io::Error),
-    Parse(httparse::Error),
-    Respond(std::io::Error),
-}
-
-impl fmt::Display for HttpError {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            HttpError::Receive(e) | HttpError::Respond(e) => e.fmt(fmt),
-            HttpError::Parse(e) => e.fmt(fmt),
-        }
-    }
-}
-
-#[allow(non_camel_case_types)]
-#[derive(Clone, Copy, Debug)]
-enum StatusCode {
-    CREATED,
-    NO_CONTENT,
-    BAD_REQUEST,
-    NOT_FOUND,
-    METHOD_NOT_ALLOWED,
-}
-
-impl StatusCode {
-    fn as_str(self) -> &'static str {
-        use StatusCode::*;
-        match self {
-            CREATED => "201",
-            NO_CONTENT => "204",
-            BAD_REQUEST => "400",
-            NOT_FOUND => "404",
-            METHOD_NOT_ALLOWED => "405",
-        }
-    }
-
-    fn reason(self) -> &'static str {
-        use StatusCode::*;
-        match self {
-            CREATED => "Created",
-            NO_CONTENT => "No Content",
-            BAD_REQUEST => "Bad Request",
-            NOT_FOUND => "Not Found",
-            METHOD_NOT_ALLOWED => "Method Not Allowed",
-        }
-    }
-}
-
-impl fmt::Display for StatusCode {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        write!(fmt, "{} {}", self.as_str(), self.reason())
-    }
-}
-
 const REGISTER_PATH: &'static str = "/register/";
 
 pub fn handle_http(
@@ -207,4 +151,60 @@ fn challenge_from_req(req: &Request) -> Result<Challenge, ()> {
         name,
         value,
     })
+}
+
+#[allow(non_camel_case_types)]
+#[derive(Clone, Copy, Debug)]
+enum StatusCode {
+    CREATED,
+    NO_CONTENT,
+    BAD_REQUEST,
+    NOT_FOUND,
+    METHOD_NOT_ALLOWED,
+}
+
+impl StatusCode {
+    fn as_str(self) -> &'static str {
+        use StatusCode::*;
+        match self {
+            CREATED => "201",
+            NO_CONTENT => "204",
+            BAD_REQUEST => "400",
+            NOT_FOUND => "404",
+            METHOD_NOT_ALLOWED => "405",
+        }
+    }
+
+    fn reason(self) -> &'static str {
+        use StatusCode::*;
+        match self {
+            CREATED => "Created",
+            NO_CONTENT => "No Content",
+            BAD_REQUEST => "Bad Request",
+            NOT_FOUND => "Not Found",
+            METHOD_NOT_ALLOWED => "Method Not Allowed",
+        }
+    }
+}
+
+impl fmt::Display for StatusCode {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        write!(fmt, "{} {}", self.as_str(), self.reason())
+    }
+}
+
+#[derive(Debug)]
+pub enum HttpError {
+    Receive(std::io::Error),
+    Parse(httparse::Error),
+    Respond(std::io::Error),
+}
+
+impl fmt::Display for HttpError {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            HttpError::Receive(e) | HttpError::Respond(e) => e.fmt(fmt),
+            HttpError::Parse(e) => e.fmt(fmt),
+        }
+    }
 }
