@@ -1,7 +1,5 @@
+use crate::challenges::Challenges;
 use crate::dns::{ReadMessageResult, ValidQueryType, response_for_message};
-
-use super::Challenges;
-
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 
 pub fn bind_udp_socket(addr: Option<SocketAddr>) -> std::io::Result<Option<UdpSocket>> {

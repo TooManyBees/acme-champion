@@ -15,10 +15,6 @@ impl Challenges {
         Challenges(LinkedList::new())
     }
 
-    pub fn all(&self) -> &LinkedList<Challenge> {
-        &self.0
-    }
-
     pub fn any(&self, name: &str) -> bool {
         for c in &self.0 {
             if c.name == name {

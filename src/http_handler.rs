@@ -1,5 +1,4 @@
-use super::{Challenge, Challenges};
-
+use crate::challenges::{Challenge, Challenges};
 use httparse::{Request, Status};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -54,7 +53,6 @@ pub fn handle_http(
 
     let result = match (req.method, req.path) {
         (None, _) | (_, None) => empty_http_response(stream, 400, "bad request"),
-        (Some("GET"), Some("/")) => handle_get_challenges(stream, challenges),
         (Some("POST"), Some(path)) if path.starts_with(REGISTER_PATH) => {
             handle_set_challenge(stream, &req, challenges)
         }
@@ -89,32 +87,6 @@ fn empty_http_response(
         "HTTP/1.1 {status_code} {reason}\r\nConnection: close\r\n\r\n"
     ))?;
     stream.flush()
-}
-
-fn full_http_response(
-    mut stream: TcpStream,
-    status_code: u16,
-    reason: &str,
-    body: &str,
-) -> std::io::Result<()> {
-    stream.write_fmt(format_args!(
-        "HTTP/1.1 {status_code} {reason}\r\nConnection: close\r\n\r\n{body}\r\n\r\n"
-    ))?;
-    stream.flush()
-}
-
-fn handle_get_challenges(stream: TcpStream, challenges: &Challenges) -> std::io::Result<()> {
-    let mut result = String::new();
-    for challenge in challenges.all().iter() {
-        result.push_str(&challenge.domain);
-        result.push(' ');
-        result.push_str(&challenge.name);
-        result.push(' ');
-        result.push_str(&format!("{:?}", challenge.value));
-        result.push('\n');
-    }
-
-    full_http_response(stream, 200, "OK", &result)
 }
 
 fn handle_set_challenge(

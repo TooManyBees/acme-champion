@@ -4,15 +4,14 @@ mod dns;
 mod dns_handler;
 mod http_handler;
 
-use std::io::ErrorKind;
-use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
-use std::time::Duration;
-use tracing::Level;
-
 use crate::challenges::{Challenge, Challenges};
 use crate::config::{Config, ConfigError, parse_config, usage};
 use crate::dns_handler::{bind_udp_socket, handle_dns};
 use crate::http_handler::{bind_tcp_listener, handle_http};
+use std::io::ErrorKind;
+use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::time::Duration;
+use tracing::Level;
 
 fn main() {
     let config = match parse_config() {
@@ -49,23 +48,22 @@ fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sy
 
     let mut challenges = Challenges::new();
 
-    let mut tcp_buf = [0u8; 512];
-    let mut udp_buf = [0u8; 512];
+    let mut buf = [0u8; 512];
     loop {
         if let Some(stream) = accept(&http_listener) {
-            if let Err(error) = handle_http(stream, &mut tcp_buf, &mut challenges) {
+            if let Err(error) = handle_http(stream, &mut buf, &mut challenges) {
                 tracing::error!(?error);
             }
         }
 
         if let Some(socket) = &dns_socket_4 {
-            if let Some((buf, addr)) = recv(&socket, &mut udp_buf) {
+            if let Some((buf, addr)) = recv(&socket, &mut buf) {
                 handle_dns(buf, &socket, addr, &challenges);
             }
         }
 
         if let Some(socket) = &dns_socket_6 {
-            if let Some((buf, addr)) = recv(&socket, &mut udp_buf) {
+            if let Some((buf, addr)) = recv(&socket, &mut buf) {
                 handle_dns(buf, &socket, addr, &challenges);
             }
         }
