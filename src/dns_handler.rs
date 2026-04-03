@@ -1,11 +1,11 @@
 use crate::challenges::Challenges;
 use crate::dns::{ReadMessageResult, ValidQueryType, response_for_message};
-use std::net::{IpAddr, SocketAddr, UdpSocket};
+use mio::net::UdpSocket;
+use std::net::{IpAddr, SocketAddr};
 
 pub fn bind_udp_socket(addr: Option<SocketAddr>) -> std::io::Result<Option<UdpSocket>> {
     addr.map(|addr| {
-        let socket =
-            UdpSocket::bind(addr).and_then(|socket| socket.set_nonblocking(true).map(|_| socket));
+        let socket = UdpSocket::bind(addr);
         tracing::debug!(%addr, "Listening for UDP traffic");
         socket
     })

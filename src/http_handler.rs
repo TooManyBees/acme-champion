@@ -1,17 +1,16 @@
 use crate::challenges::{Challenge, Challenges};
 use httparse::{Request, Status};
+use mio::net::TcpListener;
 use std::fmt;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpStream};
 
 pub fn bind_tcp_listener(port: u16) -> std::io::Result<TcpListener> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let http_listener = TcpListener::bind(addr)
-        .and_then(|listener| listener.set_nonblocking(true).map(|_| listener))
-        .map_err(|error| {
-            tracing::error!(%addr, %error, "Failed to bind TCP listener");
-            error
-        })?;
+    let http_listener = TcpListener::bind(addr).map_err(|error| {
+        tracing::error!(%addr, %error, "Failed to bind TCP listener");
+        error
+    })?;
     tracing::debug!(%addr, "Listening for TCP traffic");
     Ok(http_listener)
 }
