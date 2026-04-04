@@ -23,7 +23,7 @@ class Authenticator(dns_common.DNSAuthenticator):
     def add_parser_arguments(cls, add: Callable[..., None],
                              default_propagation_seconds: int = 10) -> None:
         super().add_parser_arguments(add, default_propagation_seconds)
-        add("acme-champion-port", help='Port on which acme-champion listens for HTTP traffic')
+        add("http-port", help='Port on which acme-champion listens for HTTP traffic')
 
     def auth_hint(self, failed_achalls: list[achallenges.AnnotatedChallenge]) -> str:
         """See certbot.plugins.common.Plugin.auth_hint."""
