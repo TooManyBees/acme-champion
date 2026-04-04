@@ -9,8 +9,8 @@ Perform a DNS-01 ACME challenge completely locally, so you never need to store c
 
 Basic usage is as follows:
 
-1. Run `acme-champion` as a background process on your server.
-2. Configure your DNS to delegate the subzone `_acme-challenge.yourdomain.tld` to the server that hosts `yourdomain.tld`. Do this for each domain you wish to obtain certificates for.
+1. Configure your DNS to delegate the subzone `_acme-challenge.yourdomain.tld` to the server that hosts `yourdomain.tld`. Do this for each domain you wish to obtain certificates for.
+2. Run `acme-champion` as a background process on your server. If some annoying background process is preventing it from listening on `0.0.0.0` or `[::]` port 53, use the `--dns-addr` (see below) option to listen on your server's IP instead.
 3. Install `certbot-dns-champ`.
 4. When you run any certbot action that prompts a challenge, invoke certbot with `--authenticator dns-champ`.
 
