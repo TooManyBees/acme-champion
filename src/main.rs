@@ -46,7 +46,16 @@ const UDP_SOCKET_6: Token = Token(2);
 fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut http_listener = bind_tcp_listener(config.http_port)?;
     let mut dns_socket_4 = bind_udp_socket(config.dns_addr_4)?;
-    let mut dns_socket_6 = bind_udp_socket(config.dns_addr_6)?;
+    let mut dns_socket_6 = match bind_udp_socket(config.dns_addr_6) {
+        Ok(maybe_socket) => maybe_socket,
+        Err(e) => {
+            if config.require_v6 {
+                return Err(e.into());
+            } else {
+                None
+            }
+        }
+    };
     tracing::info!("Listening");
 
     let mut challenges = Challenges::new();
