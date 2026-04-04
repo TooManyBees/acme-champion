@@ -1,5 +1,5 @@
 use std::fmt;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::Path;
 use std::str::FromStr;
 use tracing::Level;
@@ -27,6 +27,7 @@ pub struct Config {
     pub http_port: u16,
     pub dns_addr_4: Option<SocketAddr>,
     pub dns_addr_6: Option<SocketAddr>,
+    pub require_v6: bool,
     pub loglevel: Level,
 }
 
@@ -53,6 +54,17 @@ impl fmt::Display for ConfigError {
     }
 }
 
+const DEFAULT_ADDR_V4: SocketAddr = if cfg!(debug_assertions) {
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5053)
+} else {
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 53)
+};
+const DEFAULT_ADDR_V6: SocketAddr = if cfg!(debug_assertions) {
+    SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 5053)
+} else {
+    SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 53)
+};
+
 pub fn parse_config() -> Result<Config, ConfigError> {
     let mut config = Config {
         http_port: std::env::var("CHAMP_HTTP_PORT")
@@ -65,6 +77,7 @@ pub fn parse_config() -> Result<Config, ConfigError> {
         dns_addr_6: std::env::var("CHAMP_DNS_ADDR_6")
             .ok()
             .and_then(|s| s.parse().ok()),
+        require_v6: true,
         loglevel: std::env::var("CHAMP_LOG_LEVEL")
             .ok()
             .and_then(|s| Level::from_str(&s).ok())
@@ -111,12 +124,9 @@ pub fn parse_config() -> Result<Config, ConfigError> {
     }
 
     if config.dns_addr_4.is_none() && config.dns_addr_6.is_none() {
-        let addr = if cfg!(debug_assertions) {
-            SocketAddr::new(IpAddr::from([127, 0, 0, 1]), 5053)
-        } else {
-            SocketAddr::new(IpAddr::from([0, 0, 0, 0]), 53)
-        };
-        config.dns_addr_4 = Some(addr);
+        config.dns_addr_4 = Some(DEFAULT_ADDR_V4);
+        config.dns_addr_6 = Some(DEFAULT_ADDR_V6);
+        config.require_v6 = false;
     }
 
     Ok(config)

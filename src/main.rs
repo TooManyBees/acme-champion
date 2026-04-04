@@ -82,15 +82,23 @@ async fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Sen
     }
 
     if let Some(addr) = config.dns_addr_6 {
-        let mut udp_stream = bind_udp_stream(addr).await?;
-        let tx = tx.clone();
-        tokio::task::spawn(async move {
-            loop {
-                let event = handle_udp_connection(udp_stream.next().await);
-                let _ = tx.send(event).await;
+        match bind_udp_stream(addr).await {
+            Ok(mut udp_stream) => {
+                let tx = tx.clone();
+                tokio::task::spawn(async move {
+                    loop {
+                        let event = handle_udp_connection(udp_stream.next().await);
+                        let _ = tx.send(event).await;
+                    }
+                });
+                tracing::debug!(%addr, "Listening for UDP traffic");
             }
-        });
-        tracing::debug!(%addr, "Listening for UDP traffic");
+            Err(e) => {
+                if config.require_v6 {
+                    return Err(e.into());
+                }
+            }
+        }
     }
 
     tracing::info!("Started");
