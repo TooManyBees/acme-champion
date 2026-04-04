@@ -2,17 +2,17 @@
 
 Perform a DNS-01 ACME challenge completely locally, so you never need to store credentials for your DNS provider on your server. It consists of 2 parts:
 
-1. `acme-champion`, an extremely minimal DNS server which only responds to ACME challenge requests, and exposes a HTTP API for setting challenges
-2. `certbot-champ`, a Certbot plugin which interacts with a running `acme-champion` process via its HTTP API to set and clear challenges
+1. `acme-champion`, an extremely minimal DNS server
+2. `certbot-dns-champ`, a Certbot plugin which sets DNS challenges on a running `acme-champion` process
 
 # Usage
 
 Basic usage is as follows:
 
-1. Run `acme-champion` as a background process on your server
-2. Configure your DNS to delegate the subzone `_acme-challenge.yourdomain.tld` to the server that hosts `yourdomain.tld`.
-3. Install `certbot-acme-champion`
-4. When you run any certbot action that prompts a challenge, invoke certbot with `--acme-champion`
+1. Run `acme-champion` as a background process on your server.
+2. Configure your DNS to delegate the subzone `_acme-challenge.yourdomain.tld` to the server that hosts `yourdomain.tld`. Do this for each domain you wish to obtain certificates for.
+3. Install `certbot-dns-champ`.
+4. When you run any certbot action that prompts a challenge, invoke certbot with `--authenticator dns-champ`.
 
 ## Example
 
@@ -26,11 +26,31 @@ path/to/acme-champion --dns-addr 0.0.0.0:53 --http-port 8053 &
 ```bash
 # run this as a superuser
 ufw allow dns && ufw reload
-certbot certonly --acme-champion --http-port 8053
+certbot certonly --authenticator dns-champ --dns-champ-http-port 8053
 ufw deny dns && ufw reload
 ```
 
-The HTTP port defaults to 8053 for both the executable and the Certbot plugin; just note that they have to be the same.
+The options `--http-port` and `--dns-champ-http-port` are both optional and default to 8053, but must match.
+
+## How it works
+
+`acme-champion` relies on being able to delegate your own server at `yourdomain.tld` as the authoritative name server for `_acme-challenge.yourdomain.tld`. Add a similar NS record via your DNS provider:
+
+```
+_acme-challenge.yourdomain.tld. 30 IN  NS  yourdomain.tld.
+```
+
+Run `acme-champion` on your server. It listens for DNS traffic from the Internet, and HTTP traffic on localhost. It exposes the following HTTP routes:
+
+* `POST /register/{domain}` sets a DNS challenge
+  * `domain` is the name of the domain that the certificate will be issued for
+  * The required header `X-ACME-Challenge-Name` is the name of the challenge TXT record, usually `domain` with the label `_acme-challenge` prepended to it
+  * The required header `X-ACME-Challenge-Value` is the value of the challenge record
+* `DELETE /register/{domain}` deletes a previously set challenge
+  * The same headers as above are required
+* `GET /` returns a list of challenges that are currently registered
+
+While a challenge is registered, `acme-champion` will also serve corresponding NS and SOA records for that challenge domain, so DNS lookups will work.
 
 ## Configuration
 
@@ -38,8 +58,8 @@ The HTTP port defaults to 8053 for both the executable and the Certbot plugin; j
 
 | Arg name | Env var name | Description |
 |----------|--------------|-------------|
-| `--http-port` | `CHAMP_HTTP_PORT` | The TCP port to listen for the API. Defaults to `8053`. The API always listens on the loopback address `127.0.0.1`. |
-| `--dns-addr` | `CHAMP_DNS_ADDR` `CHAMP_DNS_ADDR_6` | The UDP address to listen for DNS traffic, in the form `IP:PORT`. The argument value can be either an IPv4 or IPv6 address; just set it twice to listen on both. Defaults to `127.0.0.1:5053` in debug, and `0.0.0.0:53` in release. |
+| `--http-port` | `CHAMP_HTTP_PORT` | The TCP port to listen for the API. Defaults to `8053`. If you change this, you must also invoke the dns-champ authenticator with `--dns-champ-http-port`. The API always listens on the loopback address `127.0.0.1`. |
+| `--dns-addr` | `CHAMP_DNS_ADDR` `CHAMP_DNS_ADDR_6` | The UDP address to listen for DNS traffic, in the form `IP:PORT`. Using args, you can set this twice: once for IPv4, and once for IPv6. Defaults to `127.0.0.1:5053` and `[::1]:5053` in debug, and `0.0.0.0:53` and `[::]:53` in release. |
 | `--level` | `CHAMP_LOG_LEVEL` | Log level. `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. Defaults to `INFO` |
 
 # Safety as an exposed DNS server
