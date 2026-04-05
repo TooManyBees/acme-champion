@@ -8,6 +8,12 @@ pub struct Challenge {
     pub value: String,
 }
 
+impl Challenge {
+    pub fn matches(&self, name: &str) -> bool {
+        self.name.eq_ignore_ascii_case(name)
+    }
+}
+
 #[derive(Debug)]
 pub struct Challenges(RwLock<LinkedList<Challenge>>);
 
@@ -23,7 +29,7 @@ impl Challenges {
     pub async fn any(&self, name: &str) -> bool {
         let cs = self.0.read().await;
         for c in cs.iter() {
-            if c.name == name {
+            if c.matches(name) {
                 return true;
             }
         }
@@ -34,7 +40,7 @@ impl Challenges {
         let cs = self.0.read().await;
         let mut matching = Vec::with_capacity(1);
         for c in cs.iter() {
-            if c.name == name {
+            if c.matches(name) {
                 matching.push(c.value.clone())
             }
         }
