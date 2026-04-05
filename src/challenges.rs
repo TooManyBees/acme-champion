@@ -7,6 +7,12 @@ pub struct Challenge {
     pub value: String,
 }
 
+impl Challenge {
+    pub fn matches(&self, name: &str) -> bool {
+        self.name.eq_ignore_ascii_case(name)
+    }
+}
+
 #[derive(Debug)]
 pub struct Challenges(LinkedList<Challenge>);
 
@@ -17,7 +23,7 @@ impl Challenges {
 
     pub fn any(&self, name: &str) -> bool {
         for c in &self.0 {
-            if c.name == name {
+            if c.matches(name) {
                 return true;
             }
         }
@@ -27,7 +33,7 @@ impl Challenges {
     pub fn named(&self, name: &str) -> Vec<String> {
         let mut matching = Vec::with_capacity(1);
         for c in &self.0 {
-            if c.name == name {
+            if c.matches(name) {
                 matching.push(c.value.clone())
             }
         }
