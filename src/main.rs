@@ -73,7 +73,7 @@ fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sy
     }
 
     let mut events = Events::with_capacity(128);
-    let mut buf = [0u8; 512];
+    let mut buf = [0u8; 1024 * 4];
     loop {
         poll.poll(&mut events, None)?;
 

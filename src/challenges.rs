@@ -17,6 +17,8 @@ impl Challenge {
 pub struct Challenges(LinkedList<Challenge>);
 
 impl Challenges {
+    const MAX_LEN: usize = 100;
+
     pub fn new() -> Challenges {
         Challenges(LinkedList::new())
     }
@@ -42,9 +44,32 @@ impl Challenges {
 
     pub fn set(&mut self, challenge: Challenge) {
         self.0.push_back(challenge);
+        if self.0.len() > Self::MAX_LEN {
+            self.0.pop_front();
+        }
     }
 
     pub fn cleanup(&mut self, challenge: &Challenge) {
         self.0.extract_if(|c| c == challenge).for_each(drop);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{Challenge, Challenges};
+
+    #[test]
+    fn does_not_exceed_max_length() {
+        let mut challenges = Challenges::new();
+
+        for _ in 0..(Challenges::MAX_LEN + 5) {
+            challenges.set(Challenge {
+                domain: "domain".into(),
+                name: "name".into(),
+                value: "value".into(),
+            });
+        }
+
+        assert_eq!(challenges.0.len(), Challenges::MAX_LEN);
     }
 }
