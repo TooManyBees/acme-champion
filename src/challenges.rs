@@ -32,14 +32,11 @@ impl Challenges {
         false
     }
 
-    pub fn named(&self, name: &str) -> Vec<String> {
-        let mut matching = Vec::with_capacity(1);
-        for c in &self.0 {
-            if c.matches(name) {
-                matching.push(c.value.clone())
-            }
-        }
-        matching
+    pub fn named(&self, name: &str) -> impl Iterator<Item = &str> {
+        self.0
+            .iter()
+            .filter(|c| c.matches(name))
+            .map(|c| c.value.as_str())
     }
 
     pub fn set(&mut self, challenge: Challenge) {
@@ -101,11 +98,10 @@ mod test {
             value: "correct value 2".into(),
         });
 
-        let result = challenges.named("_acme-challenge.example.com");
-        let mut result = result.iter();
-        assert_eq!(result.next().map(|s| s.as_str()), Some("correct value 1"));
-        assert_eq!(result.next().map(|s| s.as_str()), Some("correct value 2"));
-        assert_eq!(result.next().map(|s| s.as_str()), None);
+        let mut result = challenges.named("_acme-challenge.example.com");
+        assert_eq!(result.next(), Some("correct value 1"));
+        assert_eq!(result.next(), Some("correct value 2"));
+        assert_eq!(result.next(), None);
     }
 
     #[test]

@@ -63,7 +63,7 @@ fn handle_request(
                     challenge_value = %value,
                     "found registered DNS challenge",
                 );
-                response.add_txt_answer(query_name.clone(), value);
+                response.add_txt_answer(query_name.clone(), value.to_string());
             }
             if response.answers.is_empty() {
                 tracing::debug!(challenge_name = %challenge_key, "DNS challenge not found");
