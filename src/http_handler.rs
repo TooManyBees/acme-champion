@@ -35,6 +35,7 @@ pub fn handle_http(
 
     let result = match (req.method, req.path) {
         (None, _) | (_, None) => empty_http_response(stream, StatusCode::BAD_REQUEST),
+        (Some("GET"), Some("/")) => empty_http_response(stream, StatusCode::OK),
         (Some("POST"), Some(path)) if path.starts_with(REGISTER_PATH) => {
             handle_set_challenge(stream, &req, challenges)
         }
@@ -157,6 +158,7 @@ fn challenge_from_req(req: &Request) -> Result<Challenge, ()> {
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, Debug)]
 enum StatusCode {
+    OK,
     CREATED,
     NO_CONTENT,
     BAD_REQUEST,
@@ -168,6 +170,7 @@ impl StatusCode {
     fn as_str(self) -> &'static str {
         use StatusCode::*;
         match self {
+            OK => "200",
             CREATED => "201",
             NO_CONTENT => "204",
             BAD_REQUEST => "400",
@@ -179,6 +182,7 @@ impl StatusCode {
     fn reason(self) -> &'static str {
         use StatusCode::*;
         match self {
+            OK => "Ok",
             CREATED => "Created",
             NO_CONTENT => "No Content",
             BAD_REQUEST => "Bad Request",

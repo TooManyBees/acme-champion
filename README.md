@@ -48,7 +48,7 @@ Run `acme-champion` on your server. It listens for DNS traffic from the Internet
   * The required header `X-ACME-Challenge-Value` is the value of the challenge record
 * `DELETE /register/{domain}` deletes a previously set challenge
   * The same headers as above are required
-* `GET /` returns a list of challenges that are currently registered
+* `GET /` is a health check that just returns a `200 Ok` status code
 
 For any registered ACME challenges, `acme-champion` will answer these DNS queries:
 
