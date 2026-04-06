@@ -59,6 +59,97 @@ mod test {
     use super::{Challenge, Challenges};
 
     #[test]
+    fn any() {
+        let mut challenges = Challenges::new();
+
+        challenges.set(Challenge {
+            domain: "domain".into(),
+            name: "incorrect_name".into(),
+            value: "value".into(),
+        });
+
+        assert!(!challenges.any("name"));
+
+        challenges.set(Challenge {
+            domain: "domain".into(),
+            name: "name".into(),
+            value: "value".into(),
+        });
+
+        assert!(challenges.any("name"));
+    }
+
+    #[test]
+    fn named() {
+        let mut challenges = Challenges::new();
+
+        challenges.set(Challenge {
+            domain: "wrong.example".into(),
+            name: "_acme-challenge.wrong.example.com".into(),
+            value: "wrong value".into(),
+        });
+
+        challenges.set(Challenge {
+            domain: "example.com".into(),
+            name: "_acme-challenge.example.com".into(),
+            value: "correct value 1".into(),
+        });
+
+        challenges.set(Challenge {
+            domain: "example.com".into(),
+            name: "_acme-challenge.example.com".into(),
+            value: "correct value 2".into(),
+        });
+
+        let result = challenges.named("_acme-challenge.example.com");
+        let mut result = result.iter();
+        assert_eq!(result.next().map(|s| s.as_str()), Some("correct value 1"));
+        assert_eq!(result.next().map(|s| s.as_str()), Some("correct value 2"));
+        assert_eq!(result.next().map(|s| s.as_str()), None);
+    }
+
+    #[test]
+    fn cleanup() {
+        let mut challenges = Challenges::new();
+
+        let challenge = Challenge {
+            domain: "example.com".into(),
+            name: "_acme-challenge.example.com".into(),
+            value: "value".into(),
+        };
+
+        let other_challenge_1 = Challenge {
+            domain: "wrong.example.com".into(),
+            name: "_acme-challenge.example.com".into(),
+            value: "value".into(),
+        };
+
+        let other_challenge_2 = Challenge {
+            domain: "example.com".into(),
+            name: "_acme-challenge.example.com".into(),
+            value: "wrong value".into(),
+        };
+
+        let other_challenge_3 = Challenge {
+            domain: "example.com".into(),
+            name: "_acme-challenge.wrong.example.com".into(),
+            value: "value".into(),
+        };
+
+        challenges.set(challenge.clone());
+        challenges.set(other_challenge_1.clone());
+        challenges.set(other_challenge_2.clone());
+        challenges.set(other_challenge_3.clone());
+        challenges.cleanup(&challenge);
+
+        let mut challenges = challenges.0.into_iter();
+        assert_eq!(challenges.next(), Some(other_challenge_1));
+        assert_eq!(challenges.next(), Some(other_challenge_2));
+        assert_eq!(challenges.next(), Some(other_challenge_3));
+        assert_eq!(challenges.next(), None);
+    }
+
+    #[test]
     fn does_not_exceed_max_length() {
         let mut challenges = Challenges::new();
 
