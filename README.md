@@ -10,8 +10,8 @@ Perform a DNS-01 ACME challenge completely locally, so you never need to store c
 Basic usage is as follows:
 
 1. Configure your DNS to delegate the subzone `_acme-challenge.yourdomain.tld` to the server that hosts `yourdomain.tld`. Do this for each domain you wish to obtain certificates for.
-2. Run `acme-champion` as a background process on your server. If some annoying background process is preventing it from listening on `0.0.0.0` or `[::]` port 53, use the `--dns-addr` (see below) option to listen on your server's IP instead.
-3. Install `certbot-dns-champ`.
+2. Run `acme-champion` as a background process on your server.
+3. Install the `certbot-dns-champ` Python package.
 4. When you run any certbot action that prompts a challenge, invoke certbot with `--authenticator dns-champ`.
 
 ## Example
@@ -50,7 +50,13 @@ Run `acme-champion` on your server. It listens for DNS traffic from the Internet
   * The same headers as above are required
 * `GET /` returns a list of challenges that are currently registered
 
-While a challenge is registered, `acme-champion` will also serve corresponding NS and SOA records for that challenge domain, so DNS lookups will work.
+For any registered ACME challenges, `acme-champion` will answer these DNS queries:
+
+* `TXT` answers with each challenge value that corresponds to the challenge name.
+* `NS` removes the `_acme-challenge` label from the challenge name to determine the parent domain, and responds with an NS answer that delegates `_acme-challenge.parent.domain` to `parent.domain`. This is intended to match the NS records that you set on each of the domains you wish to obtain certificates for.
+* `SOA` returns an arbitrary SOA record.
+
+If `acme-champion` was started with DNS addresses that aren't unspecified (`0.0.0.0` or `[::]`), it will answer `A` or `AAAA` queries with the appropriate IP address.
 
 ## Configuration
 
