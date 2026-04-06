@@ -23,7 +23,7 @@ class Authenticator(dns_common.DNSAuthenticator):
     def add_parser_arguments(cls, add: Callable[..., None],
                              default_propagation_seconds: int = 10) -> None:
         super().add_parser_arguments(add, default_propagation_seconds)
-        add("http-port", help='Port on which acme-champion listens for HTTP traffic')
+        add("http-port", default=8053, help='Port on which acme-champion listens for HTTP traffic')
 
     def auth_hint(self, failed_achalls: list[achallenges.AnnotatedChallenge]) -> str:
         """See certbot.plugins.common.Plugin.auth_hint."""
@@ -40,7 +40,7 @@ class Authenticator(dns_common.DNSAuthenticator):
     def _perform(self, domain: str, validation_name: str,
                  validation: str) -> None:
         try:
-            conn = http.client.HTTPConnection("localhost", 8053, timeout=5)
+            conn = http.client.HTTPConnection("localhost", self.conf('http-port'), timeout=5)
             conn.request("POST", "/register/{}".format(domain), headers={"X-ACME-Challenge-Name": validation_name, "X-ACME-Challenge-Value": validation})
             response = conn.getresponse()
         except http.client.HTTPException as err:
@@ -53,11 +53,11 @@ class Authenticator(dns_common.DNSAuthenticator):
     def _cleanup(self, domain: str, validation_name: str,
                  validation: str) -> None:
         try:
-            conn = http.client.HTTPConnection("localhost", 8053, timeout=5)
+            conn = http.client.HTTPConnection("localhost", self.conf('http-port'), timeout=5)
             conn.request("DELETE", "/register/{}".format(domain), headers={"X-ACME-Challenge-Name": validation_name, "X-ACME-Challenge-Value": validation})
             response = conn.getresponse()
         except http.client.HTTPException as err:
-            # raise errors.PluginError("Could not reach acme-champion on localhost: {}".format(err))
+            logger.warning("Could not reach acme-champion on localhost: %s", err)
             return # who cares
         finally:
             conn.close()
