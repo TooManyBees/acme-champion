@@ -10,8 +10,12 @@ use crate::dns_handler::{bind_udp_socket, handle_dns};
 use crate::http_handler::{bind_tcp_listener, handle_http};
 use mio::net::{TcpListener, UdpSocket};
 use mio::{Events, Interest, Poll, Token};
-use std::io::ErrorKind;
-use std::net::{SocketAddr, TcpStream};
+use std::{
+    error::Error,
+    fmt,
+    io::ErrorKind,
+    net::{SocketAddr, TcpStream},
+};
 use tracing::Level;
 
 fn main() {
@@ -33,10 +37,8 @@ fn main() {
     init_tracing(config.loglevel);
 
     if let Err(error) = main_loop(config) {
-        tracing::error!(%error);
+        tracing::error!(%error, "fatal error, shutting down");
     }
-
-    tracing::info!("Shutting down");
 }
 
 const TCP_LISTENER: Token = Token(0);
@@ -45,37 +47,45 @@ const UDP_SOCKET_6: Token = Token(2);
 
 fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut http_listener = bind_tcp_listener(config.http_port)?;
-    let mut dns_socket_4 = bind_udp_socket(config.dns_addr_4)?;
-    let mut dns_socket_6 = match bind_udp_socket(config.dns_addr_6) {
-        Ok(maybe_socket) => maybe_socket,
-        Err(e) => {
-            if config.require_v6 {
-                return Err(e.into());
-            } else {
-                None
-            }
-        }
-    };
-    tracing::info!("Listening");
+    let mut dns_socket_4 = bind_udp_socket(config.dns_addr_4, true)?;
+    let mut dns_socket_6 = bind_udp_socket(config.dns_addr_6, config.require_v6)?;
 
     let mut challenges = Challenges::new();
 
-    let mut poll = Poll::new()?;
+    let mut poll = Poll::new().map_err(|error| PollError {
+        source: error,
+        message: "could not create event poll",
+    })?;
     poll.registry()
-        .register(&mut http_listener, TCP_LISTENER, Interest::READABLE)?;
+        .register(&mut http_listener, TCP_LISTENER, Interest::READABLE)
+        .map_err(|error| PollError {
+            source: error,
+            message: "could not register TCP listener for wakeup events",
+        })?;
     if let Some(ref mut socket) = dns_socket_4 {
         poll.registry()
-            .register(socket, UDP_SOCKET_4, Interest::READABLE)?;
+            .register(socket, UDP_SOCKET_4, Interest::READABLE)
+            .map_err(|error| PollError {
+                source: error,
+                message: "could not register UDP socket for wakeup events",
+            })?;
     }
     if let Some(ref mut socket) = dns_socket_6 {
         poll.registry()
-            .register(socket, UDP_SOCKET_6, Interest::READABLE)?;
+            .register(socket, UDP_SOCKET_6, Interest::READABLE)
+            .map_err(|error| PollError {
+                source: error,
+                message: "could not register UDP socket for wakeup events",
+            })?;
     }
 
     let mut events = Events::with_capacity(128);
     let mut buf = [0u8; 1024 * 4];
     loop {
-        poll.poll(&mut events, None)?;
+        poll.poll(&mut events, None).map_err(|error| PollError {
+            source: error,
+            message: "could not poll IO events",
+        })?;
 
         for event in &events {
             if !event.is_readable() {
@@ -146,4 +156,22 @@ fn init_tracing(level: Level) {
     #[cfg(not(debug_assertions))]
     let layer = tracing_subscriber::fmt::layer().compact().with_ansi(false);
     reg.with(layer.with_filter(targets)).init();
+}
+
+#[derive(Debug)]
+struct PollError {
+    source: std::io::Error,
+    message: &'static str,
+}
+
+impl fmt::Display for PollError {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        self.message.fmt(fmt)
+    }
+}
+
+impl Error for PollError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.source)
+    }
 }

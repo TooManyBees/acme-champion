@@ -11,7 +11,7 @@ pub fn bind_tcp_listener(port: u16) -> std::io::Result<TcpListener> {
         tracing::error!(%addr, %error, "Failed to bind TCP listener");
         error
     })?;
-    tracing::debug!(%addr, "Listening for TCP traffic");
+    tracing::info!(%addr, "Listening for TCP traffic");
     Ok(http_listener)
 }
 

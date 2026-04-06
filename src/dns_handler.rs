@@ -2,15 +2,31 @@ use crate::challenges::Challenges;
 use crate::config::ServerIps;
 use crate::dns::{ReadMessageResult, ValidQueryType, response_for_message};
 use mio::net::UdpSocket;
+use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr};
 
-pub fn bind_udp_socket(addr: Option<SocketAddr>) -> std::io::Result<Option<UdpSocket>> {
-    addr.map(|addr| {
-        let socket = UdpSocket::bind(addr);
-        tracing::debug!(%addr, "Listening for UDP traffic");
-        socket
-    })
-    .transpose()
+pub fn bind_udp_socket(
+    addr: Option<SocketAddr>,
+    required: bool,
+) -> std::io::Result<Option<UdpSocket>> {
+    if let Some(addr) = addr {
+        match UdpSocket::bind(addr) {
+            Ok(socket) => {
+                tracing::info!(%addr, "Listening for UDP traffic");
+                return Ok(Some(socket));
+            }
+            Err(error) if required => {
+                tracing::error!(%addr, %error, "Failed to bind UDP socket");
+                Err(error)
+            }
+            Err(error) => {
+                tracing::warn!(%addr, %error, "Failed to bind UDP socket");
+                Ok(None)
+            }
+        }
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn handle_dns(
@@ -22,16 +38,26 @@ pub fn handle_dns(
 ) {
     tracing::debug!(remote_addr = %src_addr, "new UDP message");
     if !valid_return_address(&src_addr) {
-        tracing::warn!(addr = %src_addr, "ignoring DNS request with invalid return address");
+        tracing::debug!(addr = %src_addr, "ignoring UDP message with invalid return address");
         return;
     }
 
     if let Some(response) = handle_request(message, server_ips, challenges) {
-        match socket.send_to(&response, src_addr) {
-            Err(e) => {
-                tracing::error!(error = %e, "error handling DNS request");
+        let mut warn_on_block = true;
+        loop {
+            match socket.send_to(&response, src_addr) {
+                Ok(_) => break,
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    if warn_on_block {
+                        warn_on_block = false;
+                        tracing::warn!(%error, addr = %src_addr, "UDP socket unexpectedly blocked on response");
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(%error, addr = %src_addr, "error responding to DNS request");
+                    break;
+                }
             }
-            _ => {}
         }
     }
 }
