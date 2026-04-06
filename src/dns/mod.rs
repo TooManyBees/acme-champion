@@ -32,11 +32,11 @@ pub enum ReadMessageResult {
 #[derive(Copy, Clone, Debug)]
 #[repr(u16)]
 pub enum ValidQueryType {
-    A = 1,
-    NS = 2,
-    SOA = 6,
-    TXT = 16,
-    AAAA = 28,
+    A = A_TYPE,
+    NS = NS_TYPE,
+    SOA = SOA_TYPE,
+    TXT = TXT_TYPE,
+    AAAA = AAAA_TYPE,
 }
 
 pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
