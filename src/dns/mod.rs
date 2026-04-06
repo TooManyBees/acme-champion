@@ -2,9 +2,11 @@ mod header;
 mod query;
 mod response;
 
+const A_TYPE: u16 = 1;
 const NS_TYPE: u16 = 2;
 const SOA_TYPE: u16 = 6;
 const TXT_TYPE: u16 = 16;
+const AAAA_TYPE: u16 = 28;
 const ACME_CHALLENGE_LABEL: &[u8] = b"_acme-challenge";
 
 use header::{MessageType, OpCode, QueryHeader, QueryHeaderError};
@@ -30,9 +32,11 @@ pub enum ReadMessageResult {
 #[derive(Copy, Clone, Debug)]
 #[repr(u16)]
 pub enum ValidQueryType {
+    A = 1,
     NS = 2,
     SOA = 6,
     TXT = 16,
+    AAAA = 28,
 }
 
 pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
@@ -97,9 +101,11 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
     response.query = Some(query.clone());
 
     let query_type = match query.query_type {
+        A_TYPE => ValidQueryType::A,
         TXT_TYPE => ValidQueryType::TXT,
         SOA_TYPE => ValidQueryType::SOA,
         NS_TYPE => ValidQueryType::NS,
+        AAAA_TYPE => ValidQueryType::AAAA,
         query_type => {
             tracing::debug!(
                 id = %header.transaction_id,

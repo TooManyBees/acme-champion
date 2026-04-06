@@ -1,4 +1,5 @@
 use super::{Query, QueryHeader, ValidQueryType};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 const IN_CLASS: u16 = 1;
 
@@ -28,6 +29,22 @@ impl Response {
 
     pub fn set_rcode_nxdomain(&mut self) {
         self.rcode = ResponseCode::NXDomain;
+    }
+
+    pub fn add_a_answer(&mut self, name: Vec<u8>, ip: Ipv4Addr) {
+        self.answers.push(Answer {
+            name,
+            query_type: ValidQueryType::A,
+            value: ip.to_bits().to_be_bytes().to_vec(),
+        });
+    }
+
+    pub fn add_aaaa_answer(&mut self, name: Vec<u8>, ip: Ipv6Addr) {
+        self.answers.push(Answer {
+            name,
+            query_type: ValidQueryType::AAAA,
+            value: ip.to_bits().to_be_bytes().to_vec(),
+        });
     }
 
     pub fn add_txt_answer(&mut self, name: Vec<u8>, value: String) {

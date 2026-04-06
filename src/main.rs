@@ -93,14 +93,14 @@ fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sy
                 UDP_SOCKET_4 => {
                     if let Some(socket) = &dns_socket_4 {
                         while let Some((buf, addr)) = recv(&socket, &mut buf) {
-                            handle_dns(buf, &socket, addr, &challenges);
+                            handle_dns(buf, &socket, config.server_ips, addr, &challenges);
                         }
                     }
                 }
                 UDP_SOCKET_6 => {
                     if let Some(socket) = &dns_socket_6 {
                         while let Some((buf, addr)) = recv(&socket, &mut buf) {
-                            handle_dns(buf, &socket, addr, &challenges);
+                            handle_dns(buf, &socket, config.server_ips, addr, &challenges);
                         }
                     }
                 }

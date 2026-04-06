@@ -1,4 +1,5 @@
 use crate::challenges::Challenges;
+use crate::config::ServerIps;
 use crate::dns::{ReadMessageResult, ValidQueryType, response_for_message};
 use mio::net::UdpSocket;
 use std::net::{IpAddr, SocketAddr};
@@ -15,6 +16,7 @@ pub fn bind_udp_socket(addr: Option<SocketAddr>) -> std::io::Result<Option<UdpSo
 pub fn handle_dns(
     message: &[u8],
     socket: &UdpSocket,
+    server_ips: ServerIps,
     src_addr: SocketAddr,
     challenges: &Challenges,
 ) {
@@ -24,7 +26,7 @@ pub fn handle_dns(
         return;
     }
 
-    if let Some(response) = handle_request(message, challenges) {
+    if let Some(response) = handle_request(message, server_ips, challenges) {
         match socket.send_to(&response, src_addr) {
             Err(e) => {
                 tracing::error!(error = %e, "error handling DNS request");
@@ -34,7 +36,11 @@ pub fn handle_dns(
     }
 }
 
-fn handle_request(message: &[u8], challenges: &Challenges) -> Option<Vec<u8>> {
+fn handle_request(
+    message: &[u8],
+    server_ips: ServerIps,
+    challenges: &Challenges,
+) -> Option<Vec<u8>> {
     let (mut response, query_name, query_type, challenge_key) = match response_for_message(message)
     {
         ReadMessageResult::Process {
@@ -71,6 +77,16 @@ fn handle_request(message: &[u8], challenges: &Challenges) -> Option<Vec<u8>> {
         ValidQueryType::NS => {
             if challenges.any(&challenge_key) {
                 response.add_ns_answer(query_name.clone());
+            }
+        }
+        ValidQueryType::A => {
+            if let Some(ip) = server_ips.v4 {
+                response.add_a_answer(query_name.clone(), ip);
+            }
+        }
+        ValidQueryType::AAAA => {
+            if let Some(ip) = server_ips.v6 {
+                response.add_aaaa_answer(query_name.clone(), ip);
             }
         }
     }

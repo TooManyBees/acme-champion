@@ -28,7 +28,14 @@ pub struct Config {
     pub dns_addr_4: Option<SocketAddr>,
     pub dns_addr_6: Option<SocketAddr>,
     pub require_v6: bool,
+    pub server_ips: ServerIps,
     pub loglevel: Level,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct ServerIps {
+    pub v4: Option<Ipv4Addr>,
+    pub v6: Option<Ipv6Addr>,
 }
 
 #[derive(Debug)]
@@ -78,6 +85,7 @@ pub fn parse_config() -> Result<Config, ConfigError> {
             .ok()
             .and_then(|s| s.parse().ok()),
         require_v6: true,
+        server_ips: ServerIps { v4: None, v6: None },
         loglevel: std::env::var("CHAMP_LOG_LEVEL")
             .ok()
             .and_then(|s| Level::from_str(&s).ok())
@@ -127,6 +135,22 @@ pub fn parse_config() -> Result<Config, ConfigError> {
         config.dns_addr_4 = Some(DEFAULT_ADDR_V4);
         config.dns_addr_6 = Some(DEFAULT_ADDR_V6);
         config.require_v6 = false;
+    }
+
+    if let Some(addr) = config.dns_addr_4 {
+        if let IpAddr::V4(ip) = addr.ip() {
+            if !ip.is_unspecified() {
+                config.server_ips.v4 = Some(ip);
+            }
+        }
+    }
+
+    if let Some(addr) = config.dns_addr_6 {
+        if let IpAddr::V6(ip) = addr.ip() {
+            if !ip.is_unspecified() {
+                config.server_ips.v6 = Some(ip);
+            }
+        }
     }
 
     Ok(config)
