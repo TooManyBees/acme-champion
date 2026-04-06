@@ -1,5 +1,4 @@
 use std::collections::LinkedList;
-use tokio::sync::{RwLock, RwLockReadGuard};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Challenge {
@@ -15,20 +14,15 @@ impl Challenge {
 }
 
 #[derive(Debug)]
-pub struct Challenges(RwLock<LinkedList<Challenge>>);
+pub struct Challenges(LinkedList<Challenge>);
 
 impl Challenges {
     pub fn new() -> Challenges {
-        Challenges(RwLock::new(LinkedList::new()))
+        Challenges(LinkedList::new())
     }
 
-    pub async fn all(&self) -> RwLockReadGuard<'_, LinkedList<Challenge>> {
-        self.0.read().await
-    }
-
-    pub async fn any(&self, name: &str) -> bool {
-        let cs = self.0.read().await;
-        for c in cs.iter() {
+    pub fn any(&self, name: &str) -> bool {
+        for c in &self.0 {
             if c.matches(name) {
                 return true;
             }
@@ -36,10 +30,9 @@ impl Challenges {
         false
     }
 
-    pub async fn named(&self, name: &str) -> Vec<String> {
-        let cs = self.0.read().await;
+    pub fn named(&self, name: &str) -> Vec<String> {
         let mut matching = Vec::with_capacity(1);
-        for c in cs.iter() {
+        for c in &self.0 {
             if c.matches(name) {
                 matching.push(c.value.clone())
             }
@@ -47,13 +40,11 @@ impl Challenges {
         matching
     }
 
-    pub async fn set(&self, challenge: Challenge) {
-        let mut cs = self.0.write().await;
-        cs.push_back(challenge);
+    pub fn set(&mut self, challenge: Challenge) {
+        self.0.push_back(challenge);
     }
 
-    pub async fn cleanup(&self, challenge: &Challenge) {
-        let mut cs = self.0.write().await;
-        cs.extract_if(|c| c == challenge).for_each(drop);
+    pub fn cleanup(&mut self, challenge: &Challenge) {
+        self.0.extract_if(|c| c == challenge).for_each(drop);
     }
 }
