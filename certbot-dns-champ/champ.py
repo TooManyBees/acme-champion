@@ -1,8 +1,9 @@
+from acme import challenges
 from certbot import achallenges, errors
 from certbot.plugins import dns_common
-import http.client, urllib.parse
+import http.client
 import logging
-import shlex, subprocess
+import subprocess
 from typing import Callable
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,6 @@ class Authenticator(dns_common.DNSAuthenticator):
 
     def __init__(self, *args, **kwargs):
         super(Authenticator, self).__init__(*args, **kwargs)
-        self.pid = None
 
     def more_info():
         return "This plugin answers ACME challenges by running a minimal" + \
@@ -24,6 +24,8 @@ class Authenticator(dns_common.DNSAuthenticator):
                              default_propagation_seconds: int = 10) -> None:
         super().add_parser_arguments(add, default_propagation_seconds)
         add("http-port", default=8053, help='Port on which acme-champion listens for HTTP traffic')
+        add("startup", help="Path to a shell script to run before performing authentication")
+        add("teardown", help="Path to a shell script to run after performing authentication")
 
     def auth_hint(self, failed_achalls: list[achallenges.AnnotatedChallenge]) -> str:
         """See certbot.plugins.common.Plugin.auth_hint."""
@@ -34,8 +36,9 @@ class Authenticator(dns_common.DNSAuthenticator):
             .format(name=self.name)
         )
 
-    def _setup_credentials(self) -> None:
-        return None
+    def perform(self, *args, **kwargs) -> list[challenges.ChallengeResponse]:
+        self._run_setup_script()
+        return super().perform(*args, **kwargs)
 
     def _perform(self, domain: str, validation_name: str,
                  validation: str) -> None:
@@ -50,6 +53,11 @@ class Authenticator(dns_common.DNSAuthenticator):
         if response.status != 201:
             raise errors.PluginError("Unexpected HTTP status setting challenge: {}".format(response.status))
 
+    def cleanup(self, *args, **kwargs) -> None:
+        result = super().cleanup(*args, **kwargs)
+        self._run_teardown_script()
+        result
+
     def _cleanup(self, domain: str, validation_name: str,
                  validation: str) -> None:
         try:
@@ -58,9 +66,32 @@ class Authenticator(dns_common.DNSAuthenticator):
             response = conn.getresponse()
         except http.client.HTTPException as err:
             logger.warning("Could not reach acme-champion on localhost: %s", err)
-            return # who cares
+            return
         finally:
             conn.close()
         if response.status != 204:
             logger.warning("unexpected status code cleaning up %s: %d", validation_name, response.status)
 
+    def _run_setup_script(self) -> None:
+        if self.conf("startup") is not None:
+            try:
+                subprocess.run(
+                    [ self.conf("startup") ],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+            except subprocess.CalledProcessError as err:
+                raise errors.PluginError("startup script exited with nonzero status: %d\n%s\n%s\n", err.returncode, err.stdout, err.stderr)
+
+    def _run_teardown_script(self) -> None:
+        if self.conf("teardown") is not None:
+            try:
+                subprocess.run(
+                    [ self.conf("teardown") ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+            except subprocess.CalledProcessError as err:
+                logger.warning("teardown script exited with nonzero status: %d\n%s\n%s\n", err.returncode, err.stdout, err.stderr)
