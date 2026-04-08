@@ -18,9 +18,14 @@ pub fn usage() -> String {
 \t\tlisten on (can be set twice to listen on both ipv4 and ipv6,
 \t\tin the form of 0.0.0.0:53 or [::]:53 )
 \t--log-level <LEVEL> can be ERROR, WARN, INFO, DEBUG, TRACE
-\t--log-format <FORMAT> can be PLAIN or PRETTY
+\t--log-format <FORMAT> can be {}
 \t-h or --help (you're readin' it)",
         name.display(),
+        if cfg!(feature = "journald") {
+            "PRETTY, PLAIN, JOURNALD"
+        } else {
+            "PRETTY, PLAIN"
+        },
     )
 }
 
@@ -45,7 +50,8 @@ pub struct ServerIps {
 pub enum LogFormat {
     Pretty,
     Plain,
-    // Journald,
+    #[cfg(feature = "journald")]
+    Journald,
 }
 
 impl LogFormat {
@@ -53,7 +59,8 @@ impl LogFormat {
         match s.to_lowercase().as_str() {
             "pretty" => Some(LogFormat::Pretty),
             "plain" => Some(LogFormat::Plain),
-            // "journald" => Some(LogFormat::Journald),
+            #[cfg(feature = "journald")]
+            "journald" => Some(LogFormat::Journald),
             _ => None,
         }
     }

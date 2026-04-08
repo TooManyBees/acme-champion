@@ -25,7 +25,7 @@ fn main() {
             match error {
                 ConfigError::JustPrintUsage => eprintln!("{}", usage()),
                 _ => {
-                    init_tracing(Level::ERROR, LogFormat::default());
+                    _ = init_tracing(Level::ERROR, LogFormat::default());
                     tracing::error!(%error, "Could not parse arguments");
                     eprintln!("{error}\n\n{}", usage());
                 }
@@ -151,6 +151,10 @@ fn init_tracing(level: Level, format: LogFormat) {
 
     let mut plain = None;
     let mut pretty = None;
+    #[cfg(feature = "journald")]
+    let mut journald = None;
+    #[cfg(not(feature = "journald"))]
+    let journald: Option<tracing_subscriber::layer::Identity> = None;
     match format {
         LogFormat::Pretty => {
             pretty = Some(tracing_subscriber::fmt::layer().pretty());
@@ -158,11 +162,20 @@ fn init_tracing(level: Level, format: LogFormat) {
         LogFormat::Plain => {
             plain = Some(tracing_subscriber::fmt::layer().compact().with_ansi(false));
         }
+        #[cfg(feature = "journald")]
+        LogFormat::Journald => match tracing_journald::layer() {
+            Ok(journald_layer) => journald = Some(journald_layer),
+            Err(e) => {
+                eprintln!("Could not initialize journald: {e}");
+                plain = Some(tracing_subscriber::fmt::layer().compact().with_ansi(false));
+            }
+        },
     }
 
     tracing_subscriber::registry()
         .with(plain)
         .with(pretty)
+        .with(journald)
         .with(LevelFilter::from(level))
         .init();
 }
