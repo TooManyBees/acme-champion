@@ -24,8 +24,8 @@ class Authenticator(dns_common.DNSAuthenticator):
                              default_propagation_seconds: int = 10) -> None:
         super().add_parser_arguments(add, default_propagation_seconds)
         add("http-port", default=8053, help='Port on which acme-champion listens for HTTP traffic')
-        add("startup", help="Path to a shell script to run before performing authentication")
-        add("teardown", help="Path to a shell script to run after performing authentication")
+        add("script-before", help="Path to a shell script to run before performing authentication")
+        add("script-after", help="Path to a shell script to run after performing authentication")
 
     def auth_hint(self, failed_achalls: list[achallenges.AnnotatedChallenge]) -> str:
         """See certbot.plugins.common.Plugin.auth_hint."""
@@ -73,10 +73,10 @@ class Authenticator(dns_common.DNSAuthenticator):
             logger.warning("unexpected status code cleaning up %s: %d", validation_name, response.status)
 
     def _run_setup_script(self) -> None:
-        if self.conf("startup") is not None:
+        if self.conf("script-before") is not None:
             try:
                 subprocess.run(
-                    [ self.conf("startup") ],
+                    [ self.conf("script-before") ],
                     capture_output=True,
                     text=True,
                     check=True
@@ -85,10 +85,10 @@ class Authenticator(dns_common.DNSAuthenticator):
                 raise errors.PluginError("startup script exited with nonzero status: %d\n%s\n%s\n", err.returncode, err.stdout, err.stderr)
 
     def _run_teardown_script(self) -> None:
-        if self.conf("teardown") is not None:
+        if self.conf("script-after") is not None:
             try:
                 subprocess.run(
-                    [ self.conf("teardown") ],
+                    [ self.conf("script-after") ],
                     capture_output=True,
                     text=True,
                     check=True,
