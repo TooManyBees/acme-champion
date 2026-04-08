@@ -74,19 +74,19 @@ const DEFAULT_ADDR_V6: SocketAddr = if cfg!(debug_assertions) {
 
 pub fn parse_config() -> Result<Config, ConfigError> {
     let mut config = Config {
-        http_port: std::env::var("CHAMP_HTTP_PORT")
+        http_port: std::env::var("CERTBOT_DNS_CHAMP_HTTP_PORT")
             .ok()
             .and_then(|s| u16::from_str(&s).ok())
             .unwrap_or(8053),
-        dns_addr_4: std::env::var("CHAMP_DNS_ADDR")
+        dns_addr_4: std::env::var("CERTBOT_DNS_CHAMP_DNS_ADDR")
             .ok()
             .and_then(|s| s.parse().ok()),
-        dns_addr_6: std::env::var("CHAMP_DNS_ADDR_6")
+        dns_addr_6: std::env::var("CERTBOT_DNS_CHAMP_DNS_ADDR_6")
             .ok()
             .and_then(|s| s.parse().ok()),
         require_v6: true,
         server_ips: ServerIps { v4: None, v6: None },
-        loglevel: std::env::var("CHAMP_LOG_LEVEL")
+        loglevel: std::env::var("CERTBOT_DNS_CHAMP_LOG_LEVEL")
             .ok()
             .and_then(|s| Level::from_str(&s).ok())
             .unwrap_or(Level::INFO),
