@@ -4,6 +4,8 @@ from certbot.plugins import dns_common
 import http.client
 import logging
 import subprocess
+import shlex, subprocess
+from time import sleep
 from typing import Callable
 
 logger = logging.getLogger(__name__)
@@ -14,6 +16,7 @@ class Authenticator(dns_common.DNSAuthenticator):
 
     def __init__(self, *args, **kwargs):
         super(Authenticator, self).__init__(*args, **kwargs)
+        self.child_process = None
 
     def more_info():
         return "This plugin answers ACME challenges by running a minimal" + \
@@ -26,6 +29,7 @@ class Authenticator(dns_common.DNSAuthenticator):
         add("http-port", default=8053, help='Port on which acme-champion listens for HTTP traffic')
         add("script-before", help="Path to a shell script to run before performing authentication")
         add("script-after", help="Path to a shell script to run after performing authentication")
+        add("executable", help="Path to acme-champion")
 
     def auth_hint(self, failed_achalls: list[achallenges.AnnotatedChallenge]) -> str:
         """See certbot.plugins.common.Plugin.auth_hint."""
@@ -41,6 +45,7 @@ class Authenticator(dns_common.DNSAuthenticator):
 
     def perform(self, *args, **kwargs) -> list[challenges.ChallengeResponse]:
         self._run_setup_script()
+        self._run_acme_champion()
         return super().perform(*args, **kwargs)
 
     def _perform(self, domain: str, validation_name: str,
@@ -58,6 +63,7 @@ class Authenticator(dns_common.DNSAuthenticator):
 
     def cleanup(self, *args, **kwargs) -> None:
         result = super().cleanup(*args, **kwargs)
+        self._stop_acme_champion()
         self._run_teardown_script()
         result
 
@@ -74,6 +80,24 @@ class Authenticator(dns_common.DNSAuthenticator):
             conn.close()
         if response.status != 204:
             logger.warning("unexpected status code cleaning up %s: %d", validation_name, response.status)
+
+    def _run_acme_champion(self) -> None:
+        if self.conf("executable") is not None:
+            self.child_process = subprocess.Popen(
+                [ self.conf("executable"), "--http-port", str(self.conf("http-port")) ],
+                stdout=subprocess.PIPE,
+                text=True
+            )
+            sleep(0.1)
+            self.child_process.poll()
+            if self.child_process.returncode is not None:
+                # TODO add error handling here
+                # the process exited early
+                pass
+
+    def _stop_acme_champion(self) -> None:
+        if self.child_process is not None:
+            self.child_process.kill()
 
     def _run_setup_script(self) -> None:
         if self.conf("script-before") is not None:
