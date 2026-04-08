@@ -5,7 +5,7 @@ mod dns_handler;
 mod http_handler;
 
 use crate::challenges::Challenges;
-use crate::config::{Config, ConfigError, parse_config, usage};
+use crate::config::{Config, ConfigError, LogFormat, parse_config, usage};
 use crate::dns_handler::{bind_udp_socket, handle_dns};
 use crate::http_handler::{bind_tcp_listener, handle_http};
 use mio::net::{TcpListener, UdpSocket};
@@ -25,7 +25,7 @@ fn main() {
             match error {
                 ConfigError::JustPrintUsage => eprintln!("{}", usage()),
                 _ => {
-                    init_tracing(Level::ERROR);
+                    init_tracing(Level::ERROR, LogFormat::default());
                     tracing::error!(%error, "Could not parse arguments");
                     eprintln!("{error}\n\n{}", usage());
                 }
@@ -34,7 +34,7 @@ fn main() {
         }
     };
 
-    init_tracing(config.loglevel);
+    init_tracing(config.loglevel, config.logformat);
 
     if let Err(error) = main_loop(config) {
         tracing::error!(%error, "fatal error, shutting down");
@@ -146,16 +146,25 @@ fn recv<'buf>(socket: &UdpSocket, buf: &'buf mut [u8]) -> Option<(&'buf [u8], So
     }
 }
 
-fn init_tracing(level: Level) {
-    use tracing_subscriber::{filter::Targets, prelude::*};
+fn init_tracing(level: Level, format: LogFormat) {
+    use tracing_subscriber::{filter::LevelFilter, prelude::*};
 
-    let targets = Targets::new().with_default(level);
-    let reg = tracing_subscriber::registry();
-    #[cfg(debug_assertions)]
-    let layer = tracing_subscriber::fmt::layer().pretty();
-    #[cfg(not(debug_assertions))]
-    let layer = tracing_subscriber::fmt::layer().compact().with_ansi(false);
-    reg.with(layer.with_filter(targets)).init();
+    let mut plain = None;
+    let mut pretty = None;
+    match format {
+        LogFormat::Pretty => {
+            pretty = Some(tracing_subscriber::fmt::layer().pretty());
+        }
+        LogFormat::Plain => {
+            plain = Some(tracing_subscriber::fmt::layer().compact().with_ansi(false));
+        }
+    }
+
+    tracing_subscriber::registry()
+        .with(plain)
+        .with(pretty)
+        .with(LevelFilter::from(level))
+        .init();
 }
 
 #[derive(Debug)]

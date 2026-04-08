@@ -10,13 +10,15 @@ pub fn usage() -> String {
         .and_then(|p| Path::new(&p).file_name().map(|s| s.to_owned()))
         .unwrap_or("acme-champion".into());
     format!(
-        "Usage:\t{} [--http-port PORT] [--dns-addr ADDR] [-l LOG_LEVEL]
-
-\t--http-port specifies the port that the local API will listen on
-\t\t(the API always listens on 127.0.0.1)
-\t--dns-addr is in the form of '0.0.0.0:53' or '[::]:53'
-\t\t(can be set twice to linsten on both ipv4 and ipv6)
-\t-l or --log-level can be ERROR, WARN, INFO, DEBUG, TRACE
+        "Usage:\t{} [options...]
+\t--http-port <PORT> specifies the port that the local API will
+\t\tlisten on; defaults to 8053 (the API always listens on
+\t\t127.0.0.1)
+\t--dns-addr <ADDR> specifies the address that the DNS server will
+\t\tlisten on (can be set twice to listen on both ipv4 and ipv6,
+\t\tin the form of 0.0.0.0:53 or [::]:53 )
+\t--log-level <LEVEL> can be ERROR, WARN, INFO, DEBUG, TRACE
+\t--log-format <FORMAT> can be PLAIN or PRETTY
 \t-h or --help (you're readin' it)",
         name.display(),
     )
@@ -30,12 +32,38 @@ pub struct Config {
     pub require_v6: bool,
     pub server_ips: ServerIps,
     pub loglevel: Level,
+    pub logformat: LogFormat,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct ServerIps {
     pub v4: Option<Ipv4Addr>,
     pub v6: Option<Ipv6Addr>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum LogFormat {
+    Pretty,
+    Plain,
+    // Journald,
+}
+
+impl LogFormat {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "pretty" => Some(LogFormat::Pretty),
+            "plain" => Some(LogFormat::Plain),
+            // "journald" => Some(LogFormat::Journald),
+            _ => None,
+        }
+    }
+    pub fn default() -> Self {
+        if cfg!(debug_assertions) {
+            LogFormat::Pretty
+        } else {
+            LogFormat::Plain
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -90,6 +118,10 @@ pub fn parse_config() -> Result<Config, ConfigError> {
             .ok()
             .and_then(|s| Level::from_str(&s).ok())
             .unwrap_or(Level::INFO),
+        logformat: std::env::var("CERTBOT_DNS_CHAMP_LOG_FORMAT")
+            .ok()
+            .and_then(|s| LogFormat::from_str(&s))
+            .unwrap_or(LogFormat::default()),
     };
 
     let mut args = std::env::args().skip(1);
@@ -116,13 +148,22 @@ pub fn parse_config() -> Result<Config, ConfigError> {
                 },
                 None => return Err(ConfigError::MissingArgument(flag.to_string())),
             },
-            flag @ "-l" | flag @ "--level" => {
+            flag @ "-l" | flag @ "--log-level" => {
                 config.loglevel = match args.next().as_deref() {
                     Some(s) => Level::from_str(s).map_err(|_| {
                         ConfigError::UnsupportedOption(s.to_string(), flag.to_string())
                     })?,
                     None => return Err(ConfigError::MissingArgument(flag.to_string())),
                 };
+            }
+            flag @ "--log-format" => {
+                config.logformat = match args.next().as_deref() {
+                    Some(s) => LogFormat::from_str(s).ok_or(ConfigError::UnsupportedOption(
+                        s.to_string(),
+                        flag.to_string(),
+                    ))?,
+                    None => return Err(ConfigError::MissingArgument(flag.to_string())),
+                }
             }
             "-h" | "--help" => {
                 return Err(ConfigError::JustPrintUsage);
