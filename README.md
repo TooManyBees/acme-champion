@@ -69,6 +69,14 @@ If `acme-champion` was started with DNS addresses that aren't unspecified (`0.0.
 | `--log-level` | `CERTBOT_DNS_CHAMP_LOG_LEVEL` | Log level. `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. Defaults to `INFO` |
 | `--log-format` | `CERTBOT_DNS_CHAMP_LOG_FORMAT` | Log format. `plain`, `pretty`, `journald` (only when compiled with the `journald` feature). Defaults to `pretty` in debug, and `plain` in release. |
 
-# Safety as an exposed DNS server
+# Safety notes
 
-`acme-champion` is a stub DNS server. It does not recurse to any other name servers, and only answers challenges for names that begin with the label `_acme-challenge`. If left exposed to the internet, it can't do any harm to your server or others' DNS servers.
+`acme-champion` is a stub DNS server, and:
+
+* does not recurse to any other name servers
+* only references its own internal storage for DNS answers
+* stores a maximum of 100 challenges before erasing the oldest ones
+* only processes queries for names that begin with the label `_acme-challenge`
+* is practically incapable of returning large responses, or handling requests with high concurrency, making it not a very useful pawn in a DNS amplification attack
+
+I recommend you keep port 53 firewalled when you're not actively renewing certificates anyway, but `acme-champion` is still designed to be a good neighbor to both the internet and your server.
