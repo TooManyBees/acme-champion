@@ -164,7 +164,7 @@ fn init_tracing(level: Level, format: LogFormat) {
         }
         #[cfg(feature = "journald")]
         LogFormat::Journald => match tracing_journald::layer() {
-            Ok(journald_layer) => journald = Some(journald_layer),
+            Ok(journald_layer) => journald = Some(journald_layer.with_ansi(false)),
             Err(e) => {
                 eprintln!("Could not initialize journald: {e}");
                 plain = Some(tracing_subscriber::fmt::layer().compact().with_ansi(false));
