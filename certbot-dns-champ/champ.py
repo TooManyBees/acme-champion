@@ -22,7 +22,7 @@ class Authenticator(dns_common.DNSAuthenticator):
     @classmethod
     def add_parser_arguments(cls, add: Callable[..., None],
                              default_propagation_seconds: int = 10) -> None:
-        super().add_parser_arguments(add, default_propagation_seconds)
+        super().add_parser_arguments(add, 1)
         add("http-port", default=8053, help='Port on which acme-champion listens for HTTP traffic')
         add("script-before", help="Path to a shell script to run before performing authentication")
         add("script-after", help="Path to a shell script to run after performing authentication")
