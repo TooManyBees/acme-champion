@@ -68,6 +68,17 @@ To install the Certbot plugin `dns-champ`, activate the venv associated with Cer
 
 Run `certbot plugins` to confirm that `dns-champ` is installed as an authenticator.
 
+## Configuration
+
+`acme-champion` is configured through command arguments and/or environment variables. Arguments take precedence.
+
+| Arg name | Env var name | Description |
+|----------|--------------|-------------|
+| `--http-port` | `CERTBOT_DNS_CHAMP_HTTP_PORT` | The TCP port to listen for the API. Defaults to `8053`. If you change this, you must also invoke the dns-champ authenticator with `--dns-champ-http-port`. The API always listens on the loopback address `127.0.0.1`. |
+| `--dns-addr` | `CERTBOT_DNS_CHAMP_DNS_ADDR` `CERTBOT_DNS_CHAMP_DNS_ADDR_6` | The UDP address(es) to listen for DNS traffic. Can be one or more IP addresses or socket addresses (which include the port number) separated by spaces. Designed so you can dump the output of `hostnames -I` into it, and it will ignore private IPs. Defaults to `127.0.0.1:5053` and `[::1]:5053` in debug, and `0.0.0.0:53` and `[::]:53` in release. |
+| `--log-level` | `CERTBOT_DNS_CHAMP_LOG_LEVEL` | Log level. `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. Defaults to `INFO` |
+| `--log-format` | `CERTBOT_DNS_CHAMP_LOG_FORMAT` | Log format. `plain`, `pretty`, `journald` (only when compiled with the `journald` feature). Defaults to `pretty` in debug, and `plain` in release. |
+
 ## How it works
 
 `acme-champion` relies on being able to delegate your own server at `yourdomain.tld` as the authoritative name server for `_acme-challenge.yourdomain.tld`. Add a NS record to your DNS provider, similar to this one:
@@ -93,17 +104,6 @@ For any registered ACME challenges, `acme-champion` will answer these DNS querie
 * `SOA` returns an arbitrary SOA record.
 
 If `acme-champion` was started with DNS addresses that aren't unspecified (`0.0.0.0` or `[::]`), it will answer `A` or `AAAA` queries with the appropriate IP address.
-
-## Configuration
-
-`acme-champion` is configured through command arguments and/or environment variables. Arguments take precedence.
-
-| Arg name | Env var name | Description |
-|----------|--------------|-------------|
-| `--http-port` | `CERTBOT_DNS_CHAMP_HTTP_PORT` | The TCP port to listen for the API. Defaults to `8053`. If you change this, you must also invoke the dns-champ authenticator with `--dns-champ-http-port`. The API always listens on the loopback address `127.0.0.1`. |
-| `--dns-addr` | `CERTBOT_DNS_CHAMP_DNS_ADDR` `CERTBOT_DNS_CHAMP_DNS_ADDR_6` | The UDP address(es) to listen for DNS traffic. Can be one or more IP addresses or socket addresses (which include the port number). Designed so you can dump the output of `hostnames -I` into it, and it will ignore private IPs. Defaults to `127.0.0.1:5053` and `[::1]:5053` in debug, and `0.0.0.0:53` and `[::]:53` in release. |
-| `--log-level` | `CERTBOT_DNS_CHAMP_LOG_LEVEL` | Log level. `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. Defaults to `INFO` |
-| `--log-format` | `CERTBOT_DNS_CHAMP_LOG_FORMAT` | Log format. `plain`, `pretty`, `journald` (only when compiled with the `journald` feature). Defaults to `pretty` in debug, and `plain` in release. |
 
 # Safety notes
 
