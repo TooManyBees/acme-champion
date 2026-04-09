@@ -9,32 +9,60 @@ Perform a DNS-01 ACME challenge completely locally, so you never need to store c
 
 Basic usage is as follows:
 
-1. Configure your DNS to delegate the subzone `_acme-challenge.yourdomain.tld` to the server that hosts `yourdomain.tld`. Do this for each domain you wish to obtain certificates for.
-2. Run `acme-champion` as a background process on your server.
-3. Install the `certbot-dns-champ` Python package.
-4. When you run any certbot action that prompts a challenge, invoke certbot with `--authenticator dns-champ`.
+1. For each domain `yourdomain.tld` that your server handles, add a NS record that delegates `_acme-challenge.yourdomain.tld` to `yourdomain.tld` itself.
+2. On your server, install the `certbot-dns-champ` Python package, and install `acme-champion`.
+3. When you run certbot, first start `acme-champion`, then invoke certbot with `--authenticator dns-champ`.
 
 ## Example
 
-A sample script to run Certbot using `acme-champion`, on a system with `ufw` as a firewall, might look like this:
+You could choose to keep `acme-champion` running all the time in the background. You could also start it on-demand before each certbot invocation, and stop it afterward.
 
-```bash
-# start acme-champion as a background process
-path/to/acme-champion --dns-addr 0.0.0.0:53 --http-port 8053 &
+My server uses the firewall `ufw`, so this is a minimal example that works for me.
+
+```sh
+# as a background process
+acme-champion --dns-addr "$(hostname -I)"
+
+# startup.sh
+ufw allow dns && ufw reload
+
+# teardown.sh
+ufw deny dns && ufw reload
+
+# certbot.sh
+certbot certonly -d mydomain.tld -d *.mydomain.tld \
+    --authenticator dns-champ --dns-champ-script-before startup.sh \
+    --dns-champ-script-after teardown.sh
 ```
 
-```bash
-# run this as a superuser
-ufw allow dns && ufw reload
-certbot certonly --authenticator dns-champ --dns-champ-http-port 8053
+An example where I only run `acme-champion` on demand could look like this:
+
+```sh
+acme-champion --dns-addr "$(hostname -I)"
+ACME_CHAMPION_PID=$!
+
+trap "kill $ACME_CHAMPION_PID" EXIT
+
+# 100ms is enough time to know whether or not the process bound its
+# listeners, or if it exited with an error
+sleep 0.1
+if ! ps "$ACME_CHAMPION_PID" > /dev/null; then
+  exit 1
+fi
+
+if ! ufw allow dns && ufw reload; then
+  exit 1
+fi
+
+certbot certonly -d mydomain.tld -d *.mydomain.tld \
+    --authenticator dns-champ
+
 ufw deny dns && ufw reload
 ```
 
-The options `--http-port` and `--dns-champ-http-port` are both optional and default to 8053, but must match.
-
 ## How it works
 
-`acme-champion` relies on being able to delegate your own server at `yourdomain.tld` as the authoritative name server for `_acme-challenge.yourdomain.tld`. Add a similar NS record via your DNS provider:
+`acme-champion` relies on being able to delegate your own server at `yourdomain.tld` as the authoritative name server for `_acme-challenge.yourdomain.tld`. Add a NS record to your DNS provider, similar to this one:
 
 ```
 _acme-challenge.yourdomain.tld. 30 IN  NS  yourdomain.tld.
@@ -65,7 +93,7 @@ If `acme-champion` was started with DNS addresses that aren't unspecified (`0.0.
 | Arg name | Env var name | Description |
 |----------|--------------|-------------|
 | `--http-port` | `CERTBOT_DNS_CHAMP_HTTP_PORT` | The TCP port to listen for the API. Defaults to `8053`. If you change this, you must also invoke the dns-champ authenticator with `--dns-champ-http-port`. The API always listens on the loopback address `127.0.0.1`. |
-| `--dns-addr` | `CERTBOT_DNS_CHAMP_DNS_ADDR` `CERTBOT_DNS_CHAMP_DNS_ADDR_6` | The UDP address to listen for DNS traffic, in the form `IP:PORT`. Using args, you can set this twice: once for IPv4, and once for IPv6. Defaults to `127.0.0.1:5053` and `[::1]:5053` in debug, and `0.0.0.0:53` and `[::]:53` in release. |
+| `--dns-addr` | `CERTBOT_DNS_CHAMP_DNS_ADDR` `CERTBOT_DNS_CHAMP_DNS_ADDR_6` | The UDP address(es) to listen for DNS traffic. Can be one or more IP addresses or socket addresses (which include the port number). Designed so you can dump the output of `hostnames -I` into it, and it will ignore private IPs. Defaults to `127.0.0.1:5053` and `[::1]:5053` in debug, and `0.0.0.0:53` and `[::]:53` in release. |
 | `--log-level` | `CERTBOT_DNS_CHAMP_LOG_LEVEL` | Log level. `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. Defaults to `INFO` |
 | `--log-format` | `CERTBOT_DNS_CHAMP_LOG_FORMAT` | Log format. `plain`, `pretty`, `journald` (only when compiled with the `journald` feature). Defaults to `pretty` in debug, and `plain` in release. |
 
@@ -79,4 +107,4 @@ If `acme-champion` was started with DNS addresses that aren't unspecified (`0.0.
 * only processes queries for names that begin with the label `_acme-challenge`
 * is practically incapable of returning large responses, or handling requests with high concurrency, making it not a very useful pawn in a DNS amplification attack
 
-I recommend you keep port 53 firewalled when you're not actively renewing certificates anyway, but `acme-champion` is still designed to be a good neighbor to both the internet and your server.
+I recommend you keep port 53 firewalled when you're not actively renewing certificates, but `acme-champion` is still designed to be a good neighbor to both the internet and your server.

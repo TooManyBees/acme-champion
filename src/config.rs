@@ -76,7 +76,8 @@ impl LogFormat {
 #[derive(Debug)]
 pub enum ConfigError {
     InvalidNumber(String),
-    InvalidSocket(String),
+    InvalidAddr(String),
+    UnsupportedAddrs(String),
     MissingArgument(String),
     UnsupportedOption(String, String),
     JustPrintUsage,
@@ -86,7 +87,8 @@ impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ConfigError::InvalidNumber(s) => write!(f, "{} is not a 16 bit number", s),
-            ConfigError::InvalidSocket(s) => write!(f, "{} is not a socket address", s),
+            ConfigError::InvalidAddr(s) => write!(f, "{} is neither an IP nor a socket address", s),
+            ConfigError::UnsupportedAddrs(s) => write!(f, "none of the IPs ({}) are public IPs", s),
             ConfigError::MissingArgument(s) => write!(f, "{} is missing its following argument", s),
             ConfigError::UnsupportedOption(opt, flag) => {
                 write!(f, "{} is not supported for {}", opt, flag)
@@ -96,16 +98,13 @@ impl fmt::Display for ConfigError {
     }
 }
 
-const DEFAULT_ADDR_V4: SocketAddr = if cfg!(debug_assertions) {
-    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5053)
-} else {
-    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 53)
-};
-const DEFAULT_ADDR_V6: SocketAddr = if cfg!(debug_assertions) {
-    SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 5053)
-} else {
-    SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 53)
-};
+const DEFAULT_DNS_PORT: u16 = if cfg!(debug_assertions) { 5053 } else { 53 };
+const DEFAULT_ADDR_V4: SocketAddr =
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), DEFAULT_DNS_PORT);
+const DEFAULT_ADDR_V6: SocketAddr = SocketAddr::new(
+    IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+    DEFAULT_DNS_PORT,
+);
 
 pub fn parse_config() -> Result<Config, ConfigError> {
     let mut config = Config {
@@ -143,15 +142,22 @@ pub fn parse_config() -> Result<Config, ConfigError> {
                 None => return Err(ConfigError::MissingArgument(flag.to_string())),
             },
             flag @ "--dns-addr" => match args.next() {
-                Some(s) => match s.parse::<SocketAddr>() {
-                    Ok(addr) => {
-                        if addr.is_ipv4() {
-                            config.dns_addr_4 = Some(addr);
-                        } else if addr.is_ipv6() {
-                            config.dns_addr_6 = Some(addr);
+                Some(s) => match parse_addrs(&s) {
+                    Ok(addrs) => {
+                        for addr in addrs {
+                            if addr.is_ipv4() {
+                                config.dns_addr_4 = Some(addr);
+                            } else if addr.is_ipv6() {
+                                config.dns_addr_6 = Some(addr);
+                            }
                         }
                     }
-                    Err(_) => return Err(ConfigError::InvalidSocket(s)),
+                    Err(InvalidDnsAddrs::InvalidAddr(addr)) => {
+                        return Err(ConfigError::InvalidAddr(addr.to_string()));
+                    }
+                    Err(InvalidDnsAddrs::UnsupportedAddrs(s)) => {
+                        return Err(ConfigError::UnsupportedAddrs(s.to_string()));
+                    }
                 },
                 None => return Err(ConfigError::MissingArgument(flag.to_string())),
             },
@@ -202,4 +208,51 @@ pub fn parse_config() -> Result<Config, ConfigError> {
     }
 
     Ok(config)
+}
+
+enum InvalidDnsAddrs<'a> {
+    InvalidAddr(&'a str),
+    UnsupportedAddrs(&'a str),
+}
+
+/// Parses a list of space-separated socket addresses or IP addresses.
+///
+/// If a substring is an IP address and not a socket address, it is
+/// given the default port 53 in release, or 5053 in debug.
+///
+/// This function filters out private IPs in the 10.0.0.0/8 range, so
+/// that a user can dump the output of `hostname -I` into the `--dns-addr`
+/// argument, and listen on whichever non-private IP addresses are there.
+/// Passing a single address per `--dns-addr` argument explicitly disables
+/// this filtering.
+fn parse_addrs<'a>(s: &'a str) -> Result<Vec<SocketAddr>, InvalidDnsAddrs<'a>> {
+    let mut addrs = Vec::with_capacity(2);
+    for maybe_addr in s.split(' ') {
+        if maybe_addr.is_empty() {
+            continue;
+        }
+
+        let parsed = maybe_addr.parse::<SocketAddr>().or_else(|_| {
+            maybe_addr
+                .parse::<IpAddr>()
+                .map(|ip| SocketAddr::new(ip, DEFAULT_DNS_PORT))
+        });
+
+        match parsed {
+            Ok(addr) => addrs.push(addr),
+            Err(_) => return Err(InvalidDnsAddrs::InvalidAddr(maybe_addr)),
+        }
+    }
+
+    if addrs.len() > 1 {
+        addrs.retain(|addr| match addr.ip() {
+            IpAddr::V4(ip) => !ip.is_private(),
+            IpAddr::V6(_) => true,
+        });
+    }
+
+    if addrs.is_empty() {
+        return Err(InvalidDnsAddrs::UnsupportedAddrs(s));
+    }
+    Ok(addrs)
 }
