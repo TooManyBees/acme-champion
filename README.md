@@ -10,7 +10,7 @@ Perform a DNS-01 ACME challenge completely locally, so you never need to store c
 Basic usage is as follows:
 
 1. For each domain `yourdomain.tld` that your server handles, add a NS record that delegates `_acme-challenge.yourdomain.tld` to `yourdomain.tld` itself.
-2. On your server, install the `certbot-dns-champ` Python package, and install `acme-champion`.
+2. On your server, install the `certbot-dns-champ` Python package, and install `acme-champion`. *(See Installation below)*
 3. When you run certbot, first start `acme-champion`, then invoke certbot with `--authenticator dns-champ`.
 
 ## Example
@@ -59,6 +59,14 @@ certbot certonly -d mydomain.tld -d *.mydomain.tld \
 
 ufw deny dns && ufw reload
 ```
+
+## Installation
+
+To install `acme-champion`, `cargo build --release` and copy it to somewhere memorable. `/usr/local/bin` perhaps?
+
+To install the Certbot plugin `dns-champ`, activate the venv associated with Certbot (perhaps `/opt/certbot`, as described in [Certbot's pip installation instructions](https://certbot.eff.org/instructions?ws=other&os=pip)) and `pip install /path/to/acme-champion/certbot-dns-champ`.
+
+Run `certbot plugins` to confirm that `dns-champ` is installed as an authenticator.
 
 ## How it works
 
