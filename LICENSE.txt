@@ -1,0 +1,3 @@
+acme-champion and certbot-dns-champ is not free software.
+
+You are free to use it unless you're a fuckin fascist, in which case you can instead step in front of a bus. (tag me if you do!)
