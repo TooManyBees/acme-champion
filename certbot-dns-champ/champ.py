@@ -49,7 +49,7 @@ class Authenticator(dns_common.DNSAuthenticator):
             conn = http.client.HTTPConnection("localhost", self.conf('http-port'), timeout=5)
             conn.request("POST", "/register/{}".format(domain), headers={"X-ACME-Challenge-Name": validation_name, "X-ACME-Challenge-Value": validation})
             response = conn.getresponse()
-        except http.client.HTTPException as err:
+        except (http.client.HTTPException, ConnectionError) as err:
             raise errors.PluginError("Could not reach acme-champion on localhost: {}".format(err))
         finally:
             conn.close()
@@ -67,7 +67,7 @@ class Authenticator(dns_common.DNSAuthenticator):
             conn = http.client.HTTPConnection("localhost", self.conf('http-port'), timeout=5)
             conn.request("DELETE", "/register/{}".format(domain), headers={"X-ACME-Challenge-Name": validation_name, "X-ACME-Challenge-Value": validation})
             response = conn.getresponse()
-        except http.client.HTTPException as err:
+        except (http.client.HTTPException, ConnectionError) as err:
             logger.warning("Could not reach acme-champion on localhost: %s", err)
             return
         finally:
