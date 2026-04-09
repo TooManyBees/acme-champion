@@ -1,9 +1,11 @@
 # acme-champion
 
-Perform a DNS-01 ACME challenge completely locally, so you never need to store credentials for your DNS provider on your server. It consists of 2 parts:
+Wanna get a wildcard certificate for your website through Letsencrypt? *Don't* wanna put API credentials for your DNS provider on your server?? Try running this random resolver by an internet weirdo you've never met!
 
-1. `acme-champion`, an extremely minimal DNS server
-2. `certbot-dns-champ`, a Certbot plugin which sets DNS challenges on a running `acme-champion` process
+`acme-champion` could be the random DNS resolver for you! It consists of 2 parts:
+
+1. `acme-champion`, an extremely minimal DNS resolver that answers DNS-01 ACME challenges
+2. `certbot-dns-champ`, a Certbot plugin which sets challenges on a running `acme-champion` process
 
 # Usage
 
@@ -79,7 +81,7 @@ Run `certbot plugins` to confirm that `dns-champ` is installed as an authenticat
 | `--log-level` | `CERTBOT_DNS_CHAMP_LOG_LEVEL` | Log level. `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. Defaults to `INFO` |
 | `--log-format` | `CERTBOT_DNS_CHAMP_LOG_FORMAT` | Log format. `plain`, `pretty`, `journald` (only when compiled with the `journald` feature). Defaults to `pretty` in debug, and `plain` in release. |
 
-## How it works
+# How it works
 
 `acme-champion` relies on being able to delegate your own server at `yourdomain.tld` as the authoritative name server for `_acme-challenge.yourdomain.tld`. Add a NS record to your DNS provider, similar to this one:
 
