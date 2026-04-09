@@ -124,10 +124,10 @@ pub fn parse_config() -> Result<Config, ConfigError> {
             .unwrap_or(8053),
         dns_addr_4: std::env::var("CERTBOT_DNS_CHAMP_DNS_ADDR")
             .ok()
-            .and_then(|s| s.parse().ok()),
+            .and_then(|s| parse_socketish(&s)),
         dns_addr_6: std::env::var("CERTBOT_DNS_CHAMP_DNS_ADDR_6")
             .ok()
-            .and_then(|s| s.parse().ok()),
+            .and_then(|s| parse_socketish(&s)),
         require_v6: true,
         server_ips: ServerIps { v4: None, v6: None },
         loglevel: std::env::var("CERTBOT_DNS_CHAMP_LOG_LEVEL")
@@ -242,15 +242,9 @@ fn parse_addrs<'a>(s: &'a str) -> Result<Vec<SocketAddr>, InvalidDnsAddrs<'a>> {
             continue;
         }
 
-        let parsed = maybe_addr.parse::<SocketAddr>().or_else(|_| {
-            maybe_addr
-                .parse::<IpAddr>()
-                .map(|ip| SocketAddr::new(ip, DEFAULT_DNS_PORT))
-        });
-
-        match parsed {
-            Ok(addr) => addrs.push(addr),
-            Err(_) => return Err(InvalidDnsAddrs::InvalidAddr(maybe_addr)),
+        match parse_socketish(maybe_addr) {
+            Some(addr) => addrs.push(addr),
+            None => return Err(InvalidDnsAddrs::InvalidAddr(maybe_addr)),
         }
     }
 
@@ -265,4 +259,15 @@ fn parse_addrs<'a>(s: &'a str) -> Result<Vec<SocketAddr>, InvalidDnsAddrs<'a>> {
         return Err(InvalidDnsAddrs::UnsupportedAddrs(s));
     }
     Ok(addrs)
+}
+
+fn parse_socketish(maybe_addr: &str) -> Option<SocketAddr> {
+    maybe_addr
+        .parse::<SocketAddr>()
+        .or_else(|_| {
+            maybe_addr
+                .parse::<IpAddr>()
+                .map(|ip| SocketAddr::new(ip, DEFAULT_DNS_PORT))
+        })
+        .ok()
 }
