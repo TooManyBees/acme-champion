@@ -3,11 +3,13 @@ mod config;
 mod dns;
 mod dns_handler;
 mod http_handler;
+mod logger;
 
 use crate::challenges::Challenges;
 use crate::config::{Config, ConfigError, LogFormat, parse_config, usage};
 use crate::dns_handler::{bind_udp_socket, handle_dns};
 use crate::http_handler::{bind_tcp_listener, handle_http};
+use crate::logger::init_tracing;
 use mio::net::{TcpListener, UdpSocket};
 use mio::{Events, Interest, Poll, Token};
 use std::{
@@ -144,40 +146,6 @@ fn recv<'buf>(socket: &UdpSocket, buf: &'buf mut [u8]) -> Option<(&'buf [u8], So
             None
         }
     }
-}
-
-fn init_tracing(level: Level, format: LogFormat) {
-    use tracing_subscriber::{filter::LevelFilter, prelude::*};
-
-    let mut plain = None;
-    let mut pretty = None;
-    #[cfg(feature = "journald")]
-    let mut journald = None;
-    #[cfg(not(feature = "journald"))]
-    let journald: Option<tracing_subscriber::layer::Identity> = None;
-    match format {
-        LogFormat::Pretty => {
-            pretty = Some(tracing_subscriber::fmt::layer().pretty());
-        }
-        LogFormat::Plain => {
-            plain = Some(tracing_subscriber::fmt::layer().compact().with_ansi(false));
-        }
-        #[cfg(feature = "journald")]
-        LogFormat::Journald => match tracing_journald::layer() {
-            Ok(journald_layer) => journald = Some(journald_layer.with_ansi(false)),
-            Err(e) => {
-                eprintln!("Could not initialize journald: {e}");
-                plain = Some(tracing_subscriber::fmt::layer().compact().with_ansi(false));
-            }
-        },
-    }
-
-    tracing_subscriber::registry()
-        .with(plain)
-        .with(pretty)
-        .with(journald)
-        .with(LevelFilter::from(level))
-        .init();
 }
 
 #[derive(Debug)]
