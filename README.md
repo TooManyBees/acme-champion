@@ -12,8 +12,10 @@ Wanna get a wildcard certificate for your website through Letsencrypt? *Don't* w
 Basic usage is as follows:
 
 1. For each domain `yourdomain.tld` that your server handles, add a NS record that delegates `_acme-challenge.yourdomain.tld` to `yourdomain.tld` itself.
-2. On your server, install the `certbot-dns-champ` Python package, and install `acme-champion`. *(See Installation below)*
+2. On your server, install the `certbot-dns-champ` Python package, and install `acme-champion`. *(See* [Installation](#installation) *below)*
 3. When you run certbot, first start `acme-champion`, then invoke certbot with `--authenticator dns-champ`.
+    * If TCP port 8053 is taken, pick a different port with `--http-port` *(see* [Configuration](#configuration) *below)*
+    * If you can't bind `0.0.0.0:53` or `[::]:53`, maybe because some other process like systemd-resolved is bound to `127.0.0.1:53`, pick a different IP address with `--dns-addr` *(see* [Configuration](#configuration) *below)*
 
 ## Example
 
@@ -42,7 +44,7 @@ certbot certonly -d mydomain.tld -d *.mydomain.tld \
 An example where I only run `acme-champion` on demand could look like this:
 
 ```sh
-acme-champion --dns-addr "$(hostname -I)"
+acme-champion --dns-addr "$(hostname -I)" &
 ACME_CHAMPION_PID=$!
 
 trap "kill $ACME_CHAMPION_PID" EXIT
@@ -66,9 +68,13 @@ ufw deny dns && ufw reload
 
 ## Installation
 
-To install `acme-champion`, `cargo build --release` and copy it to somewhere memorable. `/usr/local/bin` perhaps?
+Clone this repo to your server.
 
-To install the Certbot plugin `dns-champ`, activate the venv associated with Certbot (perhaps `/opt/certbot`, as described in [Certbot's pip installation instructions](https://certbot.eff.org/instructions?ws=other&os=pip)) and `pip install /path/to/acme-champion/certbot-dns-champ`.
+Compile `acme-champion` with `cargo build --release` and copy it to somewhere memorable. `/usr/local/bin` perhaps?
+
+`certbot-dns-champ` only supports pip installations of Certbot, but if you wanna be brave and ignore your distro's warnings and install it to your system's Python environment, be my guest and tell me how it goes.
+
+Activate the venv associated with Certbot (perhaps `/opt/certbot`, as described in [Certbot's pip installation instructions](https://certbot.eff.org/instructions?ws=other&os=pip)) and `pip install /path/to/acme-champion/certbot-dns-champ`.
 
 Run `certbot plugins` to confirm that `dns-champ` is installed as an authenticator.
 
@@ -79,7 +85,7 @@ Run `certbot plugins` to confirm that `dns-champ` is installed as an authenticat
 | Arg name | Env var name | Description |
 |----------|--------------|-------------|
 | `--http-port` | `CERTBOT_DNS_CHAMP_HTTP_PORT` | The TCP port to listen for the API. Defaults to `8053`. If you change this, you must also invoke the dns-champ authenticator with `--dns-champ-http-port`. The API always listens on the loopback address `127.0.0.1`. |
-| `--dns-addr` | `CERTBOT_DNS_CHAMP_DNS_ADDR` `CERTBOT_DNS_CHAMP_DNS_ADDR_6` | The UDP address(es) to listen for DNS traffic. Can be one or more IP addresses or socket addresses (which include the port number) separated by spaces. Designed so you can dump the output of `hostnames -I` into it, and it will ignore private IPs. Defaults to `127.0.0.1:5053` and `[::1]:5053` in debug, and `0.0.0.0:53` and `[::]:53` in release. |
+| `--dns-addr` | `CERTBOT_DNS_CHAMP_DNS_ADDR` `CERTBOT_DNS_CHAMP_DNS_ADDR_6` | The UDP address(es) to listen for DNS traffic. Can be one or two IP addresses or socket addresses (which include the port number) separated by spaces. If you pass more than one address here, it will ignore private IP addresses, so dumping the output of `hostname -I` could work. Defaults to `127.0.0.1:5053` and `[::1]:5053` in debug, and `0.0.0.0:53` and `[::]:53` in release. |
 | `--log-level` | `CERTBOT_DNS_CHAMP_LOG_LEVEL` | Log level. `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. Defaults to `INFO` |
 | `--log-format` | `CERTBOT_DNS_CHAMP_LOG_FORMAT` | Log format. `plain`, `pretty`, `journald` (only when compiled with the `journald` feature). Defaults to `pretty` in debug, and `plain` in release. |
 
