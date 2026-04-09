@@ -20,7 +20,7 @@ pub fn init_tracing(level: Level, format: LogFormat) {
         #[cfg(feature = "journald")]
         LogFormat::Journald => match tracing_journald::layer() {
             Ok(journald_layer) => {
-                journald = Some(journald_layer.with_ansi(false).with_target(false))
+                journald = Some(journald_layer)
             }
             Err(e) => {
                 eprintln!("Could not initialize journald: {e}");
