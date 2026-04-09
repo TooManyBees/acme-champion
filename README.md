@@ -26,9 +26,11 @@ My server uses the firewall `ufw`, so this is a minimal example that works for m
 acme-champion --dns-addr "$(hostname -I)"
 
 # startup.sh
+#!/bin/sh
 ufw allow dns && ufw reload
 
 # teardown.sh
+#!/bin/sh
 ufw deny dns && ufw reload
 
 # certbot.sh
