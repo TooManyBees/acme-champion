@@ -99,12 +99,22 @@ impl fmt::Display for ConfigError {
 }
 
 const DEFAULT_DNS_PORT: u16 = if cfg!(debug_assertions) { 5053 } else { 53 };
-const DEFAULT_ADDR_V4: SocketAddr =
-    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), DEFAULT_DNS_PORT);
-const DEFAULT_ADDR_V6: SocketAddr = SocketAddr::new(
-    IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
-    DEFAULT_DNS_PORT,
-);
+const DEFAULT_ADDR_V4: SocketAddr = if cfg!(debug_assertions) {
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), DEFAULT_DNS_PORT)
+} else {
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), DEFAULT_DNS_PORT)
+};
+const DEFAULT_ADDR_V6: SocketAddr = if cfg!(debug_assertions) {
+    SocketAddr::new(
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+        DEFAULT_DNS_PORT,
+    )
+} else {
+    SocketAddr::new(
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
+        DEFAULT_DNS_PORT,
+    )
+};
 
 pub fn parse_config() -> Result<Config, ConfigError> {
     let mut config = Config {
