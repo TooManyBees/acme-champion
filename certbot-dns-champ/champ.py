@@ -36,6 +36,9 @@ class Authenticator(dns_common.DNSAuthenticator):
             .format(name=self.name)
         )
 
+    def _setup_credentials(self) -> None:
+        pass
+
     def perform(self, *args, **kwargs) -> list[challenges.ChallengeResponse]:
         self._run_setup_script()
         return super().perform(*args, **kwargs)
