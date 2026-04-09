@@ -1,7 +1,14 @@
 [package]
 name = "acme-champion"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
+authors = ["Jess Bees"]
+description = "A tiny DNS resolver to answer ACME challenges"
+repository = "https://github.com/toomanybees/acme-champion"
+license-file = "LICENSE.txt"
+keywords = ["ACME", "letsencrypt", "DNS", "authenticator"]
+categories = ["authentication", "command-line-utilities"]
+exclude = ["certbot-dns-champ"]
 
 [dependencies]
 httparse = "1.10.1"
