@@ -12,6 +12,7 @@ exclude = ["certbot-dns-champ"]
 
 [dependencies]
 httparse = "1.10.1"
+libc = "0.2"
 mio = { version = "1.2.0", features = ["net", "os-poll"] }
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-journald = { version = "0.3.2", optional = true }

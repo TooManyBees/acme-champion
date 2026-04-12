@@ -7,6 +7,7 @@ name = "acme-champion"
 version = "1.0.0"
 dependencies = [
  "httparse",
+ "libc",
  "mio",
  "tracing",
  "tracing-journald",

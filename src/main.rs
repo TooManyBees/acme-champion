@@ -4,12 +4,14 @@ mod dns;
 mod dns_handler;
 mod http_handler;
 mod logger;
+mod user;
 
 use crate::challenges::Challenges;
 use crate::config::{Config, ConfigError, LogFormat, parse_config, usage};
 use crate::dns_handler::{bind_udp_socket, handle_dns};
 use crate::http_handler::{bind_tcp_listener, handle_http};
 use crate::logger::init_tracing;
+use crate::user::set_user;
 use mio::net::{TcpListener, UdpSocket};
 use mio::{Events, Interest, Poll, Token};
 use std::{
@@ -79,6 +81,10 @@ fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sy
                 source: error,
                 message: "could not register UDP socket for wakeup events",
             })?;
+    }
+
+    if let Some(username) = config.username {
+        set_user(&username)?;
     }
 
     let mut events = Events::with_capacity(128);

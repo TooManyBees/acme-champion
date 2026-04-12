@@ -88,6 +88,7 @@ Run `certbot plugins` to confirm that `dns-champ` is installed as an authenticat
 | `--dns-addr` | `CERTBOT_DNS_CHAMP_DNS_ADDR` `CERTBOT_DNS_CHAMP_DNS_ADDR_6` | The UDP address(es) to listen for DNS traffic. Can be one or two IP addresses or socket addresses (which include the port number) separated by spaces. If you pass more than one address here, it will ignore private IP addresses, so dumping the output of `hostname -I` could work. Defaults to `127.0.0.1:5053` and `[::1]:5053` in debug, and `0.0.0.0:53` and `[::]:53` in release. |
 | `--log-level` | `CERTBOT_DNS_CHAMP_LOG_LEVEL` | Log level. `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`. Defaults to `INFO` |
 | `--log-format` | `CERTBOT_DNS_CHAMP_LOG_FORMAT` | Log format. `plain`, `pretty`, `journald` (only when compiled with the `journald` feature). Defaults to `pretty` in debug, and `plain` in release. |
+| `--username` | `CERTBOT_DNS_CHAMP_USERNAME` | If running as superuser, change process ownership to this user after binding network sockets. |
 
 # How it works
 

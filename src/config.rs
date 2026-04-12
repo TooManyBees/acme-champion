@@ -19,6 +19,8 @@ pub fn usage() -> String {
 \t\tin the form of 0.0.0.0:53 or [::]:53 )
 \t--log-level <LEVEL> can be ERROR, WARN, INFO, DEBUG, TRACE
 \t--log-format <FORMAT> can be {}
+\t--username <USERNAME> changes the process from superuser to this
+\t\tuser after binding network ports
 \t-h or --help (you're readin' it)",
         name.display(),
         if cfg!(feature = "journald") {
@@ -38,6 +40,7 @@ pub struct Config {
     pub server_ips: ServerIps,
     pub loglevel: Level,
     pub logformat: LogFormat,
+    pub username: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -138,6 +141,7 @@ pub fn parse_config() -> Result<Config, ConfigError> {
             .ok()
             .and_then(|s| LogFormat::from_str(&s))
             .unwrap_or(LogFormat::default()),
+        username: std::env::var("CERTBOT_DNS_CHAMP_USERNAME").ok(),
     };
 
     let mut args = std::env::args().skip(1);
@@ -185,6 +189,12 @@ pub fn parse_config() -> Result<Config, ConfigError> {
                         s.to_string(),
                         flag.to_string(),
                     ))?,
+                    None => return Err(ConfigError::MissingArgument(flag.to_string())),
+                }
+            }
+            flag @ "-u" | flag @ "--username" => {
+                config.username = match args.next() {
+                    Some(u) => Some(u),
                     None => return Err(ConfigError::MissingArgument(flag.to_string())),
                 }
             }
