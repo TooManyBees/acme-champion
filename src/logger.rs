@@ -4,33 +4,30 @@ use tracing::Level;
 pub fn init_tracing(level: Level, format: LogFormat) {
     use tracing_subscriber::{filter::LevelFilter, prelude::*};
 
-    let mut plain = None;
-    let mut pretty = None;
-    #[cfg(feature = "journald")]
-    let mut journald = None;
-    #[cfg(not(feature = "journald"))]
-    let journald: Option<tracing_subscriber::layer::Identity> = None;
+    let registry = tracing_subscriber::registry().with(LevelFilter::from(level));
+
     match format {
         LogFormat::Pretty => {
-            pretty = Some(tracing_subscriber::fmt::layer().pretty());
+            registry
+                .with(tracing_subscriber::fmt::layer().pretty())
+                .init();
         }
         LogFormat::Plain => {
-            plain = Some(tracing_subscriber::fmt::layer().compact().with_ansi(false));
+            registry
+                .with(tracing_subscriber::fmt::layer().compact().with_ansi(false))
+                .init();
         }
         #[cfg(feature = "journald")]
         LogFormat::Journald => match tracing_journald::layer() {
-            Ok(journald_layer) => journald = Some(journald_layer),
+            Ok(journald_layer) => {
+                registry.with(journald_layer).init();
+            }
             Err(e) => {
                 eprintln!("Could not initialize journald: {e}");
-                plain = Some(tracing_subscriber::fmt::layer().compact().with_ansi(false));
+                registry
+                    .with(tracing_subscriber::fmt::layer().compact().with_ansi(false))
+                    .init();
             }
         },
     }
-
-    tracing_subscriber::registry()
-        .with(plain)
-        .with(pretty)
-        .with(journald)
-        .with(LevelFilter::from(level))
-        .init();
 }
