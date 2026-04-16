@@ -1,8 +1,8 @@
+use log::Level;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::Path;
 use std::str::FromStr;
-use log::Level;
 
 pub fn usage() -> String {
     let name = std::env::args()

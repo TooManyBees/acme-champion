@@ -1,36 +1,30 @@
 use crate::config::LogFormat;
-// use tracing::Level;
 use log::Level;
 
 pub fn init_logger(level: Level, format: LogFormat) {
-    use env_logger::{WriteStyle};
+    use env_logger::WriteStyle;
+
+    let mut builder = env_logger::builder();
+    let logger = builder
+        .filter_level(level.to_level_filter())
+        .write_style(WriteStyle::Never);
 
     match format {
         LogFormat::Pretty => {
-            env_logger::builder()
-                .filter_level(level.to_level_filter())
-                .write_style(WriteStyle::Auto)
-                .init();
+            logger.write_style(WriteStyle::Auto).init();
         }
-        LogFormat::Plain => {
-            env_logger::builder()
-                .filter_level(level.to_level_filter())
-                .write_style(WriteStyle::Never)
-                .init();
-        }
+        LogFormat::Plain => logger.init(),
         #[cfg(feature = "journald")]
-        LogFormat::Journald => match tracing_journald::layer() {
-            Ok(journald_layer) => {
-                // TODO
+        LogFormat::Journald => {
+            if systemd_journal_logger::connected_to_journal() {
+                systemd_journal_logger::JournalLog::new()
+                    .expect("couldn't connect to journal")
+                    .install()
+                    .unwrap();
+                log::set_max_level(level.to_level_filter());
+            } else {
+                logger.init();
             }
-            Err(e) => {
-                eprintln!("Could not initialize journald: {e}");
-                env_logger::builder()
-                    .filter_level(level.to_level_filter())
-                    .write_style(WriteStyle::Never)
-                    .format_timestamp(None)
-                    .init();
-            }
-        },
+        }
     }
 }
