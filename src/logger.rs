@@ -7,6 +7,7 @@ pub fn init_logger(level: Level, format: LogFormat) {
     let mut builder = env_logger::builder();
     let logger = builder
         .filter_level(level.to_level_filter())
+        .format_target(false)
         .write_style(WriteStyle::Never);
 
     match format {
