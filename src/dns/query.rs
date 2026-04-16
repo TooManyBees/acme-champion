@@ -37,7 +37,7 @@ impl Query {
                 break;
             }
         }
-        tracing::trace!(num_labels = %labels.len(), "parsed query labels");
+        log::trace!(num_labels:% = labels.len(); "parsed query labels");
 
         let cursor_at_end = cursor + 4;
 
@@ -45,11 +45,11 @@ impl Query {
             labels.len() > 0 && labels[0].eq_ignore_ascii_case(ACME_CHALLENGE_LABEL);
 
         let query_type = u16_at(bytes, cursor);
-        tracing::trace!(%cursor, %query_type, "parsed query type");
+        log::trace!(cursor, query_type; "parsed query type");
         cursor += 2;
 
         let query_class = u16_at(bytes, cursor);
-        tracing::trace!(%cursor, %query_class, "parsed query class");
+        log::trace!(cursor, query_class; "parsed query class");
         // cursor += 2;
 
         let mut query_name_bytes = Vec::with_capacity(255);
@@ -103,13 +103,13 @@ impl Query {
 fn read_label(bytes: &[u8], cursor: usize) -> Result<(&[u8], usize), QueryError> {
     match bytes.get(cursor) {
         Some(&len) if len & 0b11000000 == 0 => {
-            tracing::trace!("found label at cursor");
+            log::trace!("found label at cursor");
             let (label, new_cursor) = label_at(bytes, cursor)?;
             return Ok((label, new_cursor));
         }
         Some(&off) if off & 0b11000000 == 0b11000000 => {
             let ptr = (u16_at(bytes, cursor) & 0b0011111111111111) as usize;
-            tracing::trace!(ptr_offset = %ptr, "found label at pointer");
+            log::trace!(ptr_offset = ptr; "found label at pointer");
             if ptr >= cursor {
                 return Err(QueryError::InvalidLabelLength(off));
             }
@@ -127,7 +127,7 @@ fn label_at(bytes: &[u8], mut cursor: usize) -> Result<(&[u8], usize), QueryErro
     }
 
     let label_len = bytes[cursor] as usize;
-    tracing::trace!(%cursor, length = %label_len, "parsed label length");
+    log::trace!(cursor, length = label_len; "parsed label length");
     cursor += 1;
 
     if cursor + label_len > bytes.len() {
@@ -136,7 +136,7 @@ fn label_at(bytes: &[u8], mut cursor: usize) -> Result<(&[u8], usize), QueryErro
 
     let result = &bytes[cursor..(cursor + label_len)];
     cursor += label_len;
-    tracing::trace!(new_cursor = %cursor, length = %label_len, "parsed label");
+    log::trace!(new_cursor = cursor, length = label_len; "parsed label");
 
     Ok((result, cursor))
 }

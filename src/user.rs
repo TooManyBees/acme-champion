@@ -23,7 +23,7 @@ impl fmt::Display for SetUserError {
 
 pub fn set_user(username: &str) -> Result<(), SetUserError> {
     if unsafe { geteuid() != 0 } {
-        tracing::warn!("process is not running as superuser, ignoring user change");
+        log::warn!("process is not running as superuser, ignoring user change");
         return Ok(());
     }
 

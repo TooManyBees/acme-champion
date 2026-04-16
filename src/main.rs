@@ -12,6 +12,7 @@ use crate::dns_handler::{bind_udp_socket, handle_dns};
 use crate::http_handler::{bind_tcp_listener, handle_http};
 use crate::logger::init_logger;
 use crate::user::set_user;
+use log::Level;
 use mio::net::{TcpListener, UdpSocket};
 use mio::{Events, Interest, Poll, Token};
 use std::{
@@ -20,7 +21,6 @@ use std::{
     io::ErrorKind,
     net::{SocketAddr, TcpStream},
 };
-use tracing::Level;
 
 fn main() {
     let config = match parse_config() {
@@ -29,8 +29,8 @@ fn main() {
             match error {
                 ConfigError::JustPrintUsage => eprintln!("{}", usage()),
                 _ => {
-                    _ = init_logger(Level::ERROR, LogFormat::default());
-                    tracing::error!(%error, "Could not parse arguments");
+                    _ = init_logger(Level::Error, LogFormat::default());
+                    log::error!(error:% = error; "Could not parse arguments");
                     eprintln!("{error}\n\n{}", usage());
                 }
             }
@@ -41,7 +41,7 @@ fn main() {
     init_logger(config.loglevel, config.logformat);
 
     if let Err(error) = main_loop(config) {
-        tracing::error!(%error, "fatal error, shutting down");
+        log::error!(error:% = error; "fatal error, shutting down");
     }
 }
 
@@ -104,7 +104,7 @@ fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sy
                 TCP_LISTENER => {
                     while let Some(stream) = accept(&http_listener) {
                         if let Err(error) = handle_http(stream, &mut buf, &mut challenges) {
-                            tracing::error!(%error, "Error handling HTTP request");
+                            log::error!(error:% = error; "Error handling HTTP request");
                         }
                     }
                 }
@@ -137,7 +137,7 @@ fn accept(listener: &TcpListener) -> Option<TcpStream> {
         Ok(stream) => Some(stream),
         Err(ref e) if e.kind() == ErrorKind::WouldBlock => None,
         Err(error) => {
-            tracing::error!(%error, "Error receiving TCP connection");
+            log::error!(error:% = error; "Error receiving TCP connection");
             None
         }
     }
@@ -148,7 +148,7 @@ fn recv<'buf>(socket: &UdpSocket, buf: &'buf mut [u8]) -> Option<(&'buf [u8], So
         Ok((n, addr)) => Some((&buf[..n], addr)),
         Err(ref e) if e.kind() == ErrorKind::WouldBlock => None,
         Err(error) => {
-            tracing::error!(%error, "Error receiving UDP message");
+            log::error!(error:% = error; "Error receiving UDP message");
             None
         }
     }

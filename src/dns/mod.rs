@@ -43,23 +43,23 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
     let header = match QueryHeader::from_bytes(bytes) {
         Ok(header) => header,
         Err(QueryHeaderError::TooShort) => {
-            tracing::debug!("ignoring malformed message");
+            log::debug!("ignoring malformed message");
             return ReadMessageResult::DontRespond;
         }
     };
-    tracing::trace!(?header);
+    log::trace!(header:? = header; "parsed DNS header");
 
     let mut response = Response::new(&header);
 
     if header.message_type == MessageType::Reply {
-        tracing::debug!(id = %header.transaction_id, "ignoring DNS response");
+        log::debug!(id = header.transaction_id; "ignoring DNS response");
         return ReadMessageResult::DontRespond;
     }
 
     if header.opcode != OpCode::Standard {
-        tracing::debug!(
-            id = %header.transaction_id,
-            opcode = ?header.opcode,
+        log::debug!(
+            id = header.transaction_id,
+            opcode:? = header.opcode;
             "ignoring non-standard query",
         );
         response.rcode = ResponseCode::Refused;
@@ -67,9 +67,9 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
     }
 
     if header.num_questions != 1 {
-        tracing::debug!(
-            id = %header.transaction_id,
-            num_questions = %header.num_questions,
+        log::debug!(
+            id = header.transaction_id,
+            num_questions = header.num_questions;
             "ignoring query with more or less than 1 question",
         );
         response.rcode = ResponseCode::FormErr;
@@ -82,16 +82,16 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
             response.rcode = ResponseCode::FormErr;
             match e {
                 (QueryError::TooShort, _) => {
-                    tracing::debug!("query label length exceeds message size");
+                    log::debug!("query label length exceeds message size");
                 }
                 (QueryError::TooLong, _) => {
-                    tracing::debug!("query name size exceeds maximum length of 255");
+                    log::debug!("query name size exceeds maximum length of 255");
                 }
                 (QueryError::InvalidLabelLength(octet), _) => {
-                    tracing::debug!(octet, "query label length octet is malformed");
+                    log::debug!(octet; "query label length octet is malformed");
                 }
                 (QueryError::InvalidNameEncoding, _) => {
-                    tracing::debug!("query label is not valid ASCII");
+                    log::debug!("query label is not valid ASCII");
                 }
             }
             return ReadMessageResult::EarlyExit(response);
@@ -107,9 +107,9 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
         NS_TYPE => ValidQueryType::NS,
         AAAA_TYPE => ValidQueryType::AAAA,
         query_type => {
-            tracing::debug!(
-                id = %header.transaction_id,
-                %query_type,
+            log::debug!(
+                id = header.transaction_id,
+                query_type;
                 "ignoring non-TXT/NS DNS query",
             );
             response.rcode = ResponseCode::Refused;
@@ -117,22 +117,20 @@ pub fn response_for_message(bytes: &[u8]) -> ReadMessageResult {
         }
     };
 
-    tracing::trace!(?query);
-
     if !query.is_acme_challenge() {
-        tracing::debug!(
-            id = %header.transaction_id,
-            query_name = %query.query_name_string,
+        log::debug!(
+            id = header.transaction_id,
+            query_name:% = query.query_name_string;
             "ignoring non-acme DNS query");
         response.rcode = ResponseCode::Refused;
         return ReadMessageResult::EarlyExit(response);
     }
 
-    tracing::debug!(
-        id = %response.transaction_id,
-        ?query_type,
-        name = %query.query_name_string,
-        "parsed DNS query",
+    log::debug!(
+        id = response.transaction_id,
+        query_type:? = query_type,
+        name:% = query.query_name_string;
+        "received valid query",
     );
 
     ReadMessageResult::Process {

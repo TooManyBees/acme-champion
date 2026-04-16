@@ -8,10 +8,10 @@ use std::net::{SocketAddr, TcpStream};
 pub fn bind_tcp_listener(port: u16) -> std::io::Result<TcpListener> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let http_listener = TcpListener::bind(addr).map_err(|error| {
-        tracing::error!(%addr, %error, "Failed to bind TCP listener");
+        log::error!(addr:% = addr, error:% = error; "Failed to bind TCP listener");
         error
     })?;
-    tracing::info!(%addr, "Listening for TCP traffic");
+    log::info!(addr:% = addr; "Listening for TCP traffic");
     Ok(http_listener)
 }
 
@@ -50,10 +50,10 @@ pub fn handle_http(
 
     match result {
         Ok(status_code) => {
-            tracing::info!(
-                method = %req.method.unwrap_or("unknown"),
-                path = %req.path.unwrap_or("unknown"),
-                %status_code,
+            log::info!(
+                method:% = req.method.unwrap_or("unknown"),
+                path:% = req.path.unwrap_or("unknown"),
+                status_code:% = status_code;
                 "served http request",
             );
             Ok(())
@@ -86,7 +86,7 @@ fn handle_set_challenge(
     };
 
     challenges.set(challenge.clone());
-    tracing::info!(domain_name = %challenge.domain, challenge_name = %challenge.name, challenge_value = %challenge.value, "set challenge");
+    log::info!(domain_name:% = challenge.domain, challenge_name:% = challenge.name, challenge_value:% = challenge.value; "set challenge");
     empty_http_response(stream, StatusCode::CREATED)
 }
 
@@ -118,14 +118,14 @@ fn challenge_from_req(req: &Request) -> Result<Challenge, ()> {
     {
         Some(header) => header.value,
         None => {
-            tracing::warn!(domain_name = %domain, "ignoring HTTP request without X-ACME-Challenge-Name header");
+            log::warn!(domain_name:% = domain; "ignoring HTTP request without X-ACME-Challenge-Name header");
             return Err(());
         }
     };
     let name = match String::from_utf8(name_header.to_vec()) {
         Ok(s) => s.trim_end_matches('.').to_string(),
         Err(_) => {
-            tracing::warn!(domain_name = %domain, "ignoring HTTP request without non-visible ASCII challenge name");
+            log::warn!(domain_name:% = domain; "ignoring HTTP request without non-visible ASCII challenge name");
             return Err(());
         }
     };
@@ -136,14 +136,14 @@ fn challenge_from_req(req: &Request) -> Result<Challenge, ()> {
     {
         Some(header) => header.value,
         None => {
-            tracing::warn!(domain_name = %domain, challenge_name = %name, "ignoring HTTP request without X-ACME-Challenge-Value header");
+            log::warn!(domain_name:% = domain, challenge_name:% = name; "ignoring HTTP request without X-ACME-Challenge-Value header");
             return Err(());
         }
     };
     let value = match String::from_utf8(value_header.to_vec()) {
         Ok(s) => s,
         Err(_) => {
-            tracing::warn!(domain_name = %domain, challenge_name = %name, "ignoring HTTP request without non-visible ASCII challenge value");
+            log::warn!(domain_name:% = domain, challenge_name:% = name; "ignoring HTTP request without non-visible ASCII challenge value");
             return Err(());
         }
     };

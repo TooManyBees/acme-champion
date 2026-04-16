@@ -1,31 +1,34 @@
 use crate::config::LogFormat;
-use tracing::Level;
+// use tracing::Level;
+use log::Level;
 
 pub fn init_logger(level: Level, format: LogFormat) {
-    use tracing_subscriber::{filter::LevelFilter, prelude::*};
-
-    let registry = tracing_subscriber::registry().with(LevelFilter::from(level));
+    use env_logger::{WriteStyle};
 
     match format {
         LogFormat::Pretty => {
-            registry
-                .with(tracing_subscriber::fmt::layer().pretty())
+            env_logger::builder()
+                .filter_level(level.to_level_filter())
+                .write_style(WriteStyle::Auto)
                 .init();
         }
         LogFormat::Plain => {
-            registry
-                .with(tracing_subscriber::fmt::layer().compact().with_ansi(false))
+            env_logger::builder()
+                .filter_level(level.to_level_filter())
+                .write_style(WriteStyle::Never)
                 .init();
         }
         #[cfg(feature = "journald")]
         LogFormat::Journald => match tracing_journald::layer() {
             Ok(journald_layer) => {
-                registry.with(journald_layer).init();
+                // TODO
             }
             Err(e) => {
                 eprintln!("Could not initialize journald: {e}");
-                registry
-                    .with(tracing_subscriber::fmt::layer().compact().with_ansi(false))
+                env_logger::builder()
+                    .filter_level(level.to_level_filter())
+                    .write_style(WriteStyle::Never)
+                    .format_timestamp(None)
                     .init();
             }
         },

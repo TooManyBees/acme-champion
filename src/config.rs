@@ -2,7 +2,7 @@ use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::Path;
 use std::str::FromStr;
-use tracing::Level;
+use log::Level;
 
 pub fn usage() -> String {
     let name = std::env::args()
@@ -136,7 +136,7 @@ pub fn parse_config() -> Result<Config, ConfigError> {
         loglevel: std::env::var("CERTBOT_DNS_CHAMP_LOG_LEVEL")
             .ok()
             .and_then(|s| Level::from_str(&s).ok())
-            .unwrap_or(Level::INFO),
+            .unwrap_or(Level::Info),
         logformat: std::env::var("CERTBOT_DNS_CHAMP_LOG_FORMAT")
             .ok()
             .and_then(|s| LogFormat::from_str(&s))

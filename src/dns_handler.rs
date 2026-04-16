@@ -12,15 +12,15 @@ pub fn bind_udp_socket(
     if let Some(addr) = addr {
         match UdpSocket::bind(addr) {
             Ok(socket) => {
-                tracing::info!(%addr, "Listening for UDP traffic");
+                log::info!(addr:% = addr; "Listening for UDP traffic");
                 return Ok(Some(socket));
             }
             Err(error) if required => {
-                tracing::error!(%addr, %error, "Failed to bind UDP socket");
+                log::error!(addr:% = addr, error:% = error; "Failed to bind UDP socket");
                 Err(error)
             }
             Err(error) => {
-                tracing::warn!(%addr, %error, "Failed to bind UDP socket");
+                log::warn!(addr:% = addr, error:% = error; "Failed to bind UDP socket");
                 Ok(None)
             }
         }
@@ -36,9 +36,9 @@ pub fn handle_dns(
     src_addr: SocketAddr,
     challenges: &Challenges,
 ) {
-    tracing::debug!(remote_addr = %src_addr, "new UDP message");
+    log::debug!(remote_addr:% = src_addr; "new UDP message");
     if !valid_return_address(&src_addr) {
-        tracing::debug!(addr = %src_addr, "ignoring UDP message with invalid return address");
+        log::debug!(addr:% = src_addr; "ignoring UDP message with invalid return address");
         return;
     }
 
@@ -50,11 +50,11 @@ pub fn handle_dns(
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {
                     if warn_on_block {
                         warn_on_block = false;
-                        tracing::warn!(%error, addr = %src_addr, "UDP socket unexpectedly blocked on response");
+                        log::warn!(error:% = error, addr:% = src_addr; "UDP socket unexpectedly blocked on response");
                     }
                 }
                 Err(error) => {
-                    tracing::error!(%error, addr = %src_addr, "error responding to DNS request");
+                    log::error!(error:% = error, addr:% = src_addr; "error responding to DNS request");
                     break;
                 }
             }
@@ -84,15 +84,15 @@ fn handle_request(
     match query_type {
         ValidQueryType::TXT => {
             for value in challenges.named(&challenge_key) {
-                tracing::debug!(
-                    challenge_name = %challenge_key,
-                    challenge_value = %value,
+                log::debug!(
+                    challenge_name:% = challenge_key,
+                    challenge_value:% = value;
                     "found registered DNS challenge",
                 );
                 response.add_txt_answer(query_name.clone(), value.to_string());
             }
             if response.answers.is_empty() {
-                tracing::debug!(challenge_name = %challenge_key, "DNS challenge not found");
+                log::debug!(challenge_name:% = challenge_key; "DNS challenge not found");
             }
         }
         ValidQueryType::SOA => {
@@ -123,12 +123,12 @@ fn handle_request(
         response.set_rcode_noerror();
     }
 
-    tracing::trace!(?response);
-    tracing::info!(
-        id = %response.transaction_id,
-        challenge_name = %challenge_key,
-        rcode = ?response.rcode,
-        type = ?query_type,
+    log::trace!(response:? = response; "generated response");
+    log::info!(
+        id = response.transaction_id,
+        challenge_name:% = challenge_key,
+        rcode:? = response.rcode,
+        type:? = query_type;
         "answered DNS query",
     );
 
