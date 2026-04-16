@@ -97,22 +97,22 @@ fn handle_request(
         }
         ValidQueryType::SOA => {
             if challenges.any(&challenge_key) {
-                response.add_soa_answer(query_name.clone());
+                response.add_soa_answer(query_name);
             }
         }
         ValidQueryType::NS => {
             if challenges.any(&challenge_key) {
-                response.add_ns_answer(query_name.clone());
+                response.add_ns_answer(query_name);
             }
         }
         ValidQueryType::A => {
             if let Some(ip) = server_ips.v4 {
-                response.add_a_answer(query_name.clone(), ip);
+                response.add_a_answer(query_name, ip);
             }
         }
         ValidQueryType::AAAA => {
             if let Some(ip) = server_ips.v6 {
-                response.add_aaaa_answer(query_name.clone(), ip);
+                response.add_aaaa_answer(query_name, ip);
             }
         }
     }
