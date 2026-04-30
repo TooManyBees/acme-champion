@@ -1,7 +1,7 @@
 use crate::config::LogFormat;
 use tracing::Level;
 
-pub fn init_tracing(level: Level, format: LogFormat) {
+pub fn init_logger(level: Level, format: LogFormat) {
     use tracing_subscriber::{filter::LevelFilter, prelude::*};
 
     let registry = tracing_subscriber::registry().with(LevelFilter::from(level));

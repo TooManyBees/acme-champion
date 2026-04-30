@@ -10,7 +10,7 @@ use crate::challenges::Challenges;
 use crate::config::{Config, ConfigError, LogFormat, parse_config, usage};
 use crate::dns_handler::{bind_udp_socket, handle_dns};
 use crate::http_handler::{bind_tcp_listener, handle_http};
-use crate::logger::init_tracing;
+use crate::logger::init_logger;
 use crate::user::set_user;
 use mio::net::{TcpListener, UdpSocket};
 use mio::{Events, Interest, Poll, Token};
@@ -29,7 +29,7 @@ fn main() {
             match error {
                 ConfigError::JustPrintUsage => eprintln!("{}", usage()),
                 _ => {
-                    _ = init_tracing(Level::ERROR, LogFormat::default());
+                    _ = init_logger(Level::ERROR, LogFormat::default());
                     tracing::error!(%error, "Could not parse arguments");
                     eprintln!("{error}\n\n{}", usage());
                 }
@@ -38,7 +38,7 @@ fn main() {
         }
     };
 
-    init_tracing(config.loglevel, config.logformat);
+    init_logger(config.loglevel, config.logformat);
 
     if let Err(error) = main_loop(config) {
         tracing::error!(%error, "fatal error, shutting down");
