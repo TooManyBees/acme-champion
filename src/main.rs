@@ -4,6 +4,7 @@ mod dns;
 mod dns_handler;
 mod http_handler;
 mod logger;
+mod time;
 mod user;
 
 use crate::challenges::Challenges;
