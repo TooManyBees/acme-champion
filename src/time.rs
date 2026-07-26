@@ -24,14 +24,14 @@ impl fmt::Display for Time {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}",
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}Z",
             self.year,
             self.month,
             self.mday,
             self.hour,
             self.minute,
             self.second,
-            self.nanos / 1000000,
+            self.nanos / 1000,
         )
     }
 }
