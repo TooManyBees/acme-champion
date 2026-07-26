@@ -61,8 +61,8 @@ impl RateLimiter {
 
     fn cleanup(&mut self, now: i64) {
         self.states.retain(|_, state| match state {
-            State::KnownSince(start, _) => now > *start + Self::WINDOW_SECS,
-            State::BlockedUntil(end) => now > *end,
+            State::KnownSince(start, _) => now < *start + Self::WINDOW_SECS,
+            State::BlockedUntil(end) => now < *end,
         });
     }
 }
@@ -136,5 +136,38 @@ mod test {
         let result = rate_limiter.increment(addr);
         assert_eq!(result, RateLimitResult::Ok);
         assert_matches!(rate_limiter.states[&addr], State::KnownSince(_, 1));
+    }
+
+    #[test]
+    fn short_circuits_blocked_at_max_capacity() {
+        let mut rate_limiter = RateLimiter::new();
+        for n in 0..RateLimiter::MAX_SIZE as u8 {
+            let addr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, n));
+            rate_limiter.increment(addr);
+        }
+        assert_eq!(rate_limiter.states.len(), RateLimiter::MAX_SIZE);
+        let addr = IpAddr::V4(Ipv4Addr::new(1, 0, 0, 255));
+        let result = rate_limiter.increment(addr);
+        assert_eq!(result, RateLimitResult::Block);
+    }
+
+    #[test]
+    fn cleans_up_old_entries_at_max_capacity() {
+        let mut rate_limiter = RateLimiter::new();
+        for n in 0..RateLimiter::MAX_SIZE as u8 {
+            let addr = IpAddr::V4(Ipv4Addr::new(0, 0, 0, n));
+            rate_limiter.increment(addr);
+        }
+        assert_eq!(rate_limiter.states.len(), RateLimiter::MAX_SIZE);
+        for state in rate_limiter.states.values_mut() {
+            match state {
+                State::KnownSince(time, _) => *time -= RateLimiter::WINDOW_SECS * 2,
+                State::BlockedUntil(time) => *time -= RateLimiter::BLOCK_DURATION_SECS * 2,
+            }
+        }
+        let addr = IpAddr::V4(Ipv4Addr::new(1, 0, 0, 255));
+        let result = rate_limiter.increment(addr);
+        assert_eq!(result, RateLimitResult::Ok);
+        assert!(rate_limiter.states.len() < RateLimiter::MAX_SIZE);
     }
 }
