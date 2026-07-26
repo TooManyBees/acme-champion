@@ -46,7 +46,6 @@ pub fn handle_dns(
 
     let ip_addr = src_addr.ip();
     if let RateLimitResult::Block = rate_limiter.increment(ip_addr) {
-        tracing::info!(addr = %ip_addr, "rate limiting IP");
         return;
     }
 

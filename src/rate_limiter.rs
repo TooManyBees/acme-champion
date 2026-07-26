@@ -21,10 +21,16 @@ impl RateLimiter {
     pub fn increment(&mut self, src_addr: IpAddr) -> RateLimitResult {
         let now = now_secs();
 
-        if self.states.len() >= Self::MAX_SIZE {
+        let starting_len = self.states.len();
+        if starting_len >= Self::MAX_SIZE {
             self.cleanup(now);
             if self.states.len() >= Self::MAX_SIZE {
+                tracing::trace!(addr = %src_addr, "shortcircuiting blocked (at capacity)");
                 return RateLimitResult::Block;
+            }
+            if self.states.len() != starting_len {
+                let count = starting_len - self.states.len();
+                tracing::trace!(count, "purged all expired entries");
             }
         }
 
@@ -36,23 +42,29 @@ impl RateLimiter {
             State::KnownSince(start, count) => {
                 if now > *start + Self::WINDOW_SECS {
                     *entry = State::KnownSince(now, 1);
+                    tracing::trace!(addr = %src_addr, "resetting expired counter");
                     return RateLimitResult::Ok;
                 }
 
                 *count += 1;
 
                 if *count >= Self::RATE_LIMIT {
-                    *entry = State::BlockedUntil(now + Self::BLOCK_DURATION_SECS);
+                    let until = now + Self::BLOCK_DURATION_SECS;
+                    *entry = State::BlockedUntil(until);
+                    tracing::warn!(addr = %src_addr, until, "blocking new IP");
                     return RateLimitResult::Block;
                 }
 
+                tracing::trace!(addr = %src_addr, count, "request rate within limits");
                 return RateLimitResult::Ok;
             }
             State::BlockedUntil(end) => {
                 if now > *end {
                     *entry = State::KnownSince(now, 1);
+                    tracing::trace!(addr = %src_addr, "resetting expired block");
                     return RateLimitResult::Ok;
                 } else {
+                    tracing::trace!(addr = %src_addr, "request rate exceeded limits");
                     return RateLimitResult::Block;
                 }
             }
