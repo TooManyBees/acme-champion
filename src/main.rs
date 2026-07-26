@@ -4,6 +4,7 @@ mod dns;
 mod dns_handler;
 mod http_handler;
 mod logger;
+mod rate_limiter;
 mod time;
 mod user;
 
@@ -12,6 +13,7 @@ use crate::config::{Config, ConfigError, LogFormat, parse_config, usage};
 use crate::dns_handler::{bind_udp_socket, handle_dns};
 use crate::http_handler::{bind_tcp_listener, handle_http};
 use crate::logger::init_logger;
+use crate::rate_limiter::RateLimiter;
 use crate::user::set_user;
 use log::Level;
 use mio::net::{TcpListener, UdpSocket};
@@ -56,6 +58,7 @@ fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sy
     let mut dns_socket_6 = bind_udp_socket(config.dns_addr_6, config.require_v6)?;
 
     let mut challenges = Challenges::new();
+    let mut rate_limiter = RateLimiter::new();
 
     let mut poll = Poll::new().map_err(|error| PollError {
         source: error,
@@ -112,14 +115,28 @@ fn main_loop(config: Config) -> Result<(), Box<dyn std::error::Error + Send + Sy
                 UDP_SOCKET_4 => {
                     if let Some(socket) = &dns_socket_4 {
                         while let Some((buf, addr)) = recv(&socket, &mut buf) {
-                            handle_dns(buf, &socket, config.server_ips, addr, &challenges);
+                            handle_dns(
+                                buf,
+                                &socket,
+                                config.server_ips,
+                                addr,
+                                &challenges,
+                                &mut rate_limiter,
+                            );
                         }
                     }
                 }
                 UDP_SOCKET_6 => {
                     if let Some(socket) = &dns_socket_6 {
                         while let Some((buf, addr)) = recv(&socket, &mut buf) {
-                            handle_dns(buf, &socket, config.server_ips, addr, &challenges);
+                            handle_dns(
+                                buf,
+                                &socket,
+                                config.server_ips,
+                                addr,
+                                &challenges,
+                                &mut rate_limiter,
+                            );
                         }
                     }
                 }

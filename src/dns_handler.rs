@@ -1,6 +1,7 @@
 use crate::challenges::Challenges;
 use crate::config::ServerIps;
 use crate::dns::{ReadMessageResult, ValidQueryType, response_for_message};
+use crate::rate_limiter::{RateLimitResult, RateLimiter};
 use mio::net::UdpSocket;
 use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr};
@@ -35,10 +36,16 @@ pub fn handle_dns(
     server_ips: ServerIps,
     src_addr: SocketAddr,
     challenges: &Challenges,
+    rate_limiter: &mut RateLimiter,
 ) {
     log::debug!(remote_addr:% = src_addr; "new UDP message");
     if !valid_return_address(&src_addr) {
         log::debug!(addr:% = src_addr; "ignoring UDP message with invalid return address");
+        return;
+    }
+
+    let ip_addr = src_addr.ip();
+    if let RateLimitResult::Block = rate_limiter.increment(ip_addr) {
         return;
     }
 
