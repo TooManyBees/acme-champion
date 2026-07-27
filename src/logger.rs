@@ -9,7 +9,6 @@ pub fn init_logger(level: Level, format: LogFormat) {
     let mut builder = env_logger::builder();
     let logger = builder
         .filter_level(level.to_level_filter())
-        .format_target(false)
         .format(format_record)
         .write_style(WriteStyle::Never);
 
@@ -40,10 +39,12 @@ fn format_record(formatter: &mut Formatter, record: &Record) -> std::io::Result<
     let t = Time::from(now);
     let level = record.level();
     let level_style = formatter.default_level_style(level);
+    let bold_style = level_style.bold();
+    let target = record.target();
     let args = record.args();
     write!(
         formatter,
-        "{DIMMED}{t}{DIMMED:#} {level_style}{level:<5} {args}{level_style:#}"
+        "{DIMMED}{t}{DIMMED:#} {level_style}{level:<5} {level_style}{args}, {bold_style}module{bold_style:#}{level_style}={target}"
     )?;
 
     record
@@ -51,7 +52,7 @@ fn format_record(formatter: &mut Formatter, record: &Record) -> std::io::Result<
         .visit(&mut Visitor { formatter, style: level_style })
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
-    write!(formatter, "\n")
+    write!(formatter, "{level_style:#}\n")
 }
 
 struct Visitor<'a> {
@@ -66,7 +67,7 @@ impl<'kvs> kv::VisitSource<'kvs> for Visitor<'_> {
         let style = self.style;
         let key_style = self.style.bold();
 
-        write!(self.formatter, " {key_style}{key}{key_style:#}{style}=")?;
+        write!(self.formatter, ", {key_style}{key}{key_style:#}{style}=")?;
         let value_str = value.to_string();
         if value_str.chars().any(|c| NEEDS_ESCAPE.contains(&c)) {
             let escaped_value = value_str.escape_debug().to_string();
@@ -74,7 +75,6 @@ impl<'kvs> kv::VisitSource<'kvs> for Visitor<'_> {
         } else {
             write!(self.formatter, "{value_str}")?;
         }
-        write!(self.formatter, "{style:#}")?;
         Ok(())
     }
 }
