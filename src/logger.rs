@@ -44,7 +44,7 @@ fn format_record(formatter: &mut Formatter, record: &Record) -> std::io::Result<
     let args = record.args();
     write!(
         formatter,
-        "{DIMMED}{t}{DIMMED:#} {level_style}{level:<5} {level_style}{args}, {bold_style}module{bold_style:#}{level_style}={target}"
+        "{DIMMED}{t}{DIMMED:#} {level_style}{level:>5} {bold_style}{target}{bold_style:#}{level_style}: {args}"
     )?;
 
     record
