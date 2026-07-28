@@ -9,14 +9,16 @@ pub fn init_logger(level: Level, format: LogFormat) {
     let mut builder = env_logger::builder();
     let logger = builder
         .filter_level(level.to_level_filter())
-        .format(format_record)
         .write_style(WriteStyle::Never);
 
     match format {
         LogFormat::Pretty => {
-            logger.write_style(WriteStyle::Auto).init();
+            logger
+                .format(format_pretty)
+                .write_style(WriteStyle::Auto)
+                .init();
         }
-        LogFormat::Plain => logger.init(),
+        LogFormat::Plain => logger.format(format_plain).init(),
         #[cfg(feature = "journald")]
         LogFormat::Journald => {
             if systemd_journal_logger::connected_to_journal() {
@@ -26,7 +28,7 @@ pub fn init_logger(level: Level, format: LogFormat) {
                     .unwrap();
                 log::set_max_level(level.to_level_filter());
             } else {
-                logger.init();
+                logger.format(format_plain).init();
             }
         }
     }
@@ -34,7 +36,19 @@ pub fn init_logger(level: Level, format: LogFormat) {
 
 const DIMMED: anstyle::Style = anstyle::Style::new().dimmed();
 
-fn format_record(formatter: &mut Formatter, record: &Record) -> std::io::Result<()> {
+fn format_pretty(formatter: &mut Formatter, record: &Record) -> std::io::Result<()> {
+    format_record(LogFormat::Pretty, formatter, record)
+}
+
+fn format_plain(formatter: &mut Formatter, record: &Record) -> std::io::Result<()> {
+    format_record(LogFormat::Plain, formatter, record)
+}
+
+fn format_record(
+    format: LogFormat,
+    formatter: &mut Formatter,
+    record: &Record,
+) -> std::io::Result<()> {
     let now = SystemTime::now();
     let t = Time::from(now);
     let level = record.level();
@@ -49,13 +63,18 @@ fn format_record(formatter: &mut Formatter, record: &Record) -> std::io::Result<
 
     record
         .key_values()
-        .visit(&mut Visitor { formatter, style: level_style })
+        .visit(&mut Visitor {
+            format,
+            formatter,
+            style: level_style,
+        })
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     write!(formatter, "{level_style:#}\n")
 }
 
 struct Visitor<'a> {
+    format: LogFormat,
     formatter: &'a mut Formatter,
     style: anstyle::Style,
 }
@@ -67,7 +86,12 @@ impl<'kvs> kv::VisitSource<'kvs> for Visitor<'_> {
         let style = self.style;
         let key_style = self.style.bold();
 
-        write!(self.formatter, ", {key_style}{key}{key_style:#}{style}=")?;
+        match self.format {
+            LogFormat::Plain => write!(self.formatter, " {key_style}{key}{key_style:#}{style}=")?,
+            LogFormat::Pretty => {
+                write!(self.formatter, ", {key_style}{key}{key_style:#}{style}: ")?
+            }
+        }
         let value_str = value.to_string();
         if value_str.chars().any(|c| NEEDS_ESCAPE.contains(&c)) {
             let escaped_value = value_str.escape_debug().to_string();
