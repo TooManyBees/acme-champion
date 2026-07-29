@@ -91,6 +91,8 @@ impl<'kvs> kv::VisitSource<'kvs> for Visitor<'_> {
             LogFormat::Pretty => {
                 write!(self.formatter, ", {key_style}{key}{key_style:#}{style}: ")?
             }
+            #[cfg(feature = "journald")]
+            LogFormat::Journald => panic!("This visitor shouldn't be running for the journald logger"),
         }
         let value_str = value.to_string();
         if value_str.chars().any(|c| NEEDS_ESCAPE.contains(&c)) {
